@@ -96,7 +96,8 @@ table.sl tr.rider.out td:not(.dns-cell) { opacity: .4; }
 table.sl tr.rider.out .nm { text-decoration: line-through; }
 tr.dns .dns-btn[data-dns] { background: var(--danger); border-color: var(--danger); color: #fff; }
 tr.dnf .dns-btn[data-dnf] { background: var(--dnf); border-color: var(--dnf); color: #fff; }
-tr.out .check { border-style: dashed; }
+tr.dns .check { border-style: dashed; }
+table.sl tr.rider.dnf td.chk-td { opacity: 1; }
 .dns-cell { white-space: nowrap; }
 
 @media (max-width: 900px) {
@@ -376,8 +377,7 @@ let shownPhase = null;
 
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 // Each rider gets one check, labelled pre or post by when it was done; both count toward the same total.
-// DNS riders drop out of the total. DNF riders keep any check they already had (e.g. pre-race) and count as done;
-// a DNF rider who was never checked drops out of the total like a DNS.
+// DNS riders drop out of the total. DNF riders started, so they stay in the total: checked or still to check.
 const STATUS = { dns: 'DNS', dnf: 'DNF' };
 function isDns(r, bib) { return !!(r.dns && r.dns[bib]); }
 function isDnf(r, bib) { return !!(r.dnf && r.dnf[bib]); }
@@ -393,7 +393,7 @@ function counts(r) {
   for (const x of r.riders) {
     if (isDns(r, x.bib)) { c.dns++; continue; }
     const k = checkOf(r, x.bib);
-    if (isDnf(r, x.bib)) { c.dnf++; if (!k) continue; }
+    if (isDnf(r, x.bib)) c.dnf++;
     c.total++;
     if (k) { c.done++; c[k.phase]++; }
   }
@@ -470,7 +470,7 @@ function fmtTime(iso) {
 
 function checkCell(k, out) {
   const when = k ? `<span class="ptag ${k.phase}">${k.phase.toUpperCase()}</span>${fmtTime(k.at)}` : '';
-  return `<td class="ctr"><span class="check">${out && !k ? '' : '✓'}</span><span class="when">${when}</span></td>`;
+  return `<td class="ctr chk-td"><span class="check">${out && !k ? '' : '✓'}</span><span class="when">${when}</span></td>`;
 }
 
 function renderRace() {
@@ -491,7 +491,7 @@ function renderRace() {
   const q = $('#search').value.trim().toLowerCase();
   const rows = r.riders.filter(x => {
     const done = !!checkOf(r, x.bib);
-    if (filter === 'todo' && (done || statusOf(r, x.bib))) return false;
+    if (filter === 'todo' && (done || isDns(r, x.bib))) return false;
     if (filter === 'done' && !done) return false;
     if (!q) return true;
     if (/^\d+$/.test(q)) return x.bib === q || x.bib.startsWith(q);
@@ -512,7 +512,7 @@ function renderRace() {
       <td class="num hide-sm">${esc(x.uci)}</td>
       <td class="ctr dns-cell"><button class="dns-btn" data-dns="${esc(x.bib)}">DNS</button>
         <button class="dns-btn" data-dnf="${esc(x.bib)}">DNF</button></td>
-      ${checkCell(k, !!st)}
+      ${checkCell(k, st === 'dns')}
     </tr>`;
   }).join('') || `<tr><td colspan="11" class="ctr" style="padding:30px;color:var(--muted)">No riders match.</td></tr>`;
 }
@@ -535,8 +535,7 @@ function toggle(bib) {
   lastTap = { key: bib, t: now };
   const r = races[currentId];
   const label = riderLabel(r, bib);
-  const st = statusOf(r, bib);
-  if (st) { toast(`${label} is ${STATUS[st]}. Tap ${STATUS[st]} to clear it first.`); return; }
+  if (isDns(r, bib)) { toast(`${label} is DNS. Tap DNS to clear it first.`); return; }
   const k = checkOf(r, bib);
   if (k) {
     if (!confirm(`Uncheck ${label}?\n\n${PHASES[k.phase]} check at ${fmtTime(k.at)}.`)) return;
