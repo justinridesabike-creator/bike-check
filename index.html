@@ -13,12 +13,12 @@
 <style>
 :root {
   --bg: #f4f5f7; --card: #ffffff; --ink: #16181d; --muted: #6b7280; --line: #e3e5ea;
-  --accent: #1d4ed8; --done: #15803d; --done-bg: #e8f6ec; --danger: #b91c1c; --chip: #eef1f6;
+  --accent: #1d4ed8; --dnf: #c2410c; --done: #15803d; --done-bg: #e8f6ec; --danger: #b91c1c; --chip: #eef1f6;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0f1115; --card: #181b21; --ink: #eceef2; --muted: #9aa1ad; --line: #2a2e36;
-    --accent: #6d9bff; --done: #4ade80; --done-bg: #14301f; --danger: #f87171; --chip: #232731;
+    --accent: #6d9bff; --dnf: #fb923c; --done: #4ade80; --done-bg: #14301f; --danger: #f87171; --chip: #232731;
   }
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
@@ -88,14 +88,16 @@ tr.done .check { background: var(--done); border-color: var(--done); color: #fff
 .phase-note button { border: 0; background: none; color: var(--accent); font-weight: 700; padding: 4px; cursor: pointer; }
 .race-card .count { margin-top: 6px; font-size: 14px; font-weight: 600; }
 .race-card .split { color: var(--muted); font-weight: 500; }
-.when { font-size: 11px; color: var(--muted); display: block; text-align: center; margin-top: 2px; min-height: 13px; }
+.when { font-size: 11px; color: var(--muted); display: block; white-space: nowrap; text-align: center; margin-top: 2px; min-height: 13px; }
 .dns-btn { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 8px 10px;
   font-size: 13px; font-weight: 700; color: var(--muted); cursor: pointer; }
-table.sl tr.rider.dns { background: var(--chip); }
-table.sl tr.rider.dns td:not(.dns-cell) { opacity: .4; }
-table.sl tr.rider.dns .nm { text-decoration: line-through; }
-tr.dns .dns-btn { background: var(--danger); border-color: var(--danger); color: #fff; }
-tr.dns .check { border-style: dashed; }
+table.sl tr.rider.out { background: var(--chip); }
+table.sl tr.rider.out td:not(.dns-cell) { opacity: .4; }
+table.sl tr.rider.out .nm { text-decoration: line-through; }
+tr.dns .dns-btn[data-dns] { background: var(--danger); border-color: var(--danger); color: #fff; }
+tr.dnf .dns-btn[data-dnf] { background: var(--dnf); border-color: var(--dnf); color: #fff; }
+tr.out .check { border-style: dashed; }
+.dns-cell { white-space: nowrap; }
 
 @media (max-width: 900px) {
   .hide-md { display: none; }
@@ -153,7 +155,7 @@ tr.dns .check { border-style: dashed; }
     </div>
     <div id="moreTools" class="tools hidden">
       <button id="exportBtn" class="btn small">Export CSV</button>
-      <button id="resetBtn" class="btn small danger">Clear all checks &amp; DNS</button>
+      <button id="resetBtn" class="btn small danger">Clear all checks, DNS &amp; DNF</button>
       <button id="deleteBtn" class="btn small danger">Remove this race</button>
     </div>
   </div>
@@ -169,13 +171,13 @@ tr.dns .check { border-style: dashed; }
         <th class="num hide-md">YOB</th>
         <th class="num hide-sm">WCS</th>
         <th class="num hide-sm">UCI</th>
-        <th class="ctr">DNS</th>
+        <th class="ctr">DNS / DNF</th>
         <th class="ctr">Checked</th>
       </tr>
     </thead>
     <tbody id="rows"></tbody>
   </table>
-  <p class="footer-note">Tap a rider to check them off. The Pre-race / Post-race switch sets the label on new checks. Tap DNS for a known non-starter.</p>
+  <p class="footer-note">Tap a rider to check them off. The Pre-race / Post-race switch sets the label on new checks. Tap DNS for a known non-starter, DNF for a rider who didn't finish.</p>
 </section>
 
 <div id="toast" class="toast hidden"><span id="toastMsg"></span><button id="toastUndo">Undo</button></div>
@@ -197,7 +199,7 @@ let races = loadRaces();
 // Older saves had one "checks" map; it becomes the pre-race checks.
 for (const r of Object.values(races)) {
   if (r.checks) { r.pre = r.pre || r.checks; delete r.checks; }
-  r.pre = r.pre || {}; r.post = r.post || {}; r.dns = r.dns || {}; delete r.phase;
+  r.pre = r.pre || {}; r.post = r.post || {}; r.dns = r.dns || {}; r.dnf = r.dnf || {}; delete r.phase;
 }
 
 /* ---------- PDF parsing ---------- */
@@ -354,8 +356,8 @@ async function importFile(file) {
   const id = [meta.date, meta.discipline, meta.category, meta.startTime].filter(Boolean).join(' | ') || file.name;
   const existing = races[id];
   // Re-importing a revised start list keeps checks and DNS marks for bibs that are still on it.
-  const keep = existing ? { pre: existing.pre, post: existing.post, dns: existing.dns, manualPhase: existing.manualPhase }
-    : { pre: {}, post: {}, dns: {} };
+  const keep = existing ? { pre: existing.pre, post: existing.post, dns: existing.dns, dnf: existing.dnf || {}, manualPhase: existing.manualPhase }
+    : { pre: {}, post: {}, dns: {}, dnf: {} };
   races[id] = {
     id, meta, riders, ...keep,
     fileName: file.name,
@@ -374,8 +376,12 @@ let shownPhase = null;
 
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 // Each rider gets one check, labelled pre or post by when it was done; both count toward the same total.
-// DNS riders drop out of the total: progress is checked / (starters - DNS).
+// DNS riders drop out of the total. DNF riders keep any check they already had (e.g. pre-race) and count as done;
+// a DNF rider who was never checked drops out of the total like a DNS.
+const STATUS = { dns: 'DNS', dnf: 'DNF' };
 function isDns(r, bib) { return !!(r.dns && r.dns[bib]); }
+function isDnf(r, bib) { return !!(r.dnf && r.dnf[bib]); }
+function statusOf(r, bib) { return isDns(r, bib) ? 'dns' : isDnf(r, bib) ? 'dnf' : null; }
 function checkOf(r, bib) {
   if (isDns(r, bib)) return null;
   if (r.pre[bib]) return { phase: 'pre', at: r.pre[bib] };
@@ -383,17 +389,18 @@ function checkOf(r, bib) {
   return null;
 }
 function counts(r) {
-  const c = { done: 0, pre: 0, post: 0, dns: 0, total: 0 };
+  const c = { done: 0, pre: 0, post: 0, dns: 0, dnf: 0, total: 0 };
   for (const x of r.riders) {
     if (isDns(r, x.bib)) { c.dns++; continue; }
-    c.total++;
     const k = checkOf(r, x.bib);
+    if (isDnf(r, x.bib)) { c.dnf++; if (!k) continue; }
+    c.total++;
     if (k) { c.done++; c[k.phase]++; }
   }
   return c;
 }
 function splitText(c) {
-  return [c.pre ? `${c.pre} pre` : '', c.post ? `${c.post} post` : '', c.dns ? `${c.dns} DNS` : ''].filter(Boolean).join(' · ');
+  return [c.pre ? `${c.pre} pre` : '', c.post ? `${c.post} post` : '', c.dns ? `${c.dns} DNS` : '', c.dnf ? `${c.dnf} DNF` : ''].filter(Boolean).join(' · ');
 }
 function countText(c) { return `${c.done} / ${c.total}`; }
 function raceTitle(r) { return r.meta.category || r.fileName; }
@@ -461,9 +468,9 @@ function fmtTime(iso) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function checkCell(k, dns) {
+function checkCell(k, out) {
   const when = k ? `<span class="ptag ${k.phase}">${k.phase.toUpperCase()}</span>${fmtTime(k.at)}` : '';
-  return `<td class="ctr"><span class="check">${dns ? '' : '✓'}</span><span class="when">${when}</span></td>`;
+  return `<td class="ctr"><span class="check">${out && !k ? '' : '✓'}</span><span class="when">${when}</span></td>`;
 }
 
 function renderRace() {
@@ -483,18 +490,17 @@ function renderRace() {
   $('#rvBar').style.width = (cnt.total ? cnt.done / cnt.total * 100 : 100) + '%';
   const q = $('#search').value.trim().toLowerCase();
   const rows = r.riders.filter(x => {
-    const dns = isDns(r, x.bib);
     const done = !!checkOf(r, x.bib);
-    if (filter === 'todo' && (done || dns)) return false;
+    if (filter === 'todo' && (done || statusOf(r, x.bib))) return false;
     if (filter === 'done' && !done) return false;
     if (!q) return true;
     if (/^\d+$/.test(q)) return x.bib === q || x.bib.startsWith(q);
     return [x.name, x.team, x.nat, x.uciId].join(' ').toLowerCase().includes(q);
   });
   $('#rows').innerHTML = rows.map(x => {
-    const dns = isDns(r, x.bib);
+    const st = statusOf(r, x.bib);
     const k = checkOf(r, x.bib), done = !!k;
-    return `<tr class="rider ${done ? 'done' : ''} ${dns ? 'dns' : ''}" data-bib="${esc(x.bib)}">
+    return `<tr class="rider ${done ? 'done' : ''} ${st ? 'out ' + st : ''}" data-bib="${esc(x.bib)}">
       <td class="num">${esc(x.start)}${x.flag ? ` <span class="flag">${esc(x.flag)}</span>` : ''}</td>
       <td class="ctr hide-sm">${x.outfit ? `<span class="outfit">${esc(x.outfit)}</span>` : ''}</td>
       <td class="bib">${esc(x.bib)}</td>
@@ -504,8 +510,9 @@ function renderRace() {
       <td class="num hide-md">${esc(x.yob)}</td>
       <td class="num hide-sm">${esc(x.wcs)}</td>
       <td class="num hide-sm">${esc(x.uci)}</td>
-      <td class="ctr dns-cell"><button class="dns-btn" data-dns="${esc(x.bib)}">DNS</button></td>
-      ${checkCell(k, dns)}
+      <td class="ctr dns-cell"><button class="dns-btn" data-dns="${esc(x.bib)}">DNS</button>
+        <button class="dns-btn" data-dnf="${esc(x.bib)}">DNF</button></td>
+      ${checkCell(k, !!st)}
     </tr>`;
   }).join('') || `<tr><td colspan="11" class="ctr" style="padding:30px;color:var(--muted)">No riders match.</td></tr>`;
 }
@@ -528,7 +535,8 @@ function toggle(bib) {
   lastTap = { key: bib, t: now };
   const r = races[currentId];
   const label = riderLabel(r, bib);
-  if (isDns(r, bib)) { toast(`${label} is DNS. Tap DNS to clear it first.`); return; }
+  const st = statusOf(r, bib);
+  if (st) { toast(`${label} is ${STATUS[st]}. Tap ${STATUS[st]} to clear it first.`); return; }
   const k = checkOf(r, bib);
   if (k) {
     if (!confirm(`Uncheck ${label}?\n\n${PHASES[k.phase]} check at ${fmtTime(k.at)}.`)) return;
@@ -543,26 +551,32 @@ function toggle(bib) {
   }
 }
 
-function toggleDns(bib) {
+function toggleStatus(bib, kind) {
   const r = races[currentId];
-  const label = riderLabel(r, bib);
-  const before = r.dns[bib] || null;
+  const label = riderLabel(r, bib), name = STATUS[kind];
+  const other = kind === 'dns' ? 'dnf' : 'dns';
+  const before = r[kind][bib] || null;
   const cleared = {};
   if (before) {
-    if (!confirm(`Remove DNS for ${label}?`)) return;
-    delete r.dns[bib];
+    if (!confirm(`Remove ${name} for ${label}?`)) return;
+    delete r[kind][bib];
   } else {
-    // A DNS rider can't also be checked; if they were, confirm and clear the checks.
-    const had = Object.keys(PHASES).filter(p => r[p][bib]);
-    if (had.length) {
-      if (!confirm(`${label} is already checked. Mark as DNS and remove the check?`)) return;
-      for (const p of had) { cleared[p] = r[p][bib]; delete r[p][bib]; }
+    const msgs = [];
+    if (r[other][bib]) msgs.push(`is marked ${STATUS[other]}`);
+    // A DNS rider never raced, so any check is removed. A DNF rider keeps a check made before they dropped out.
+    const had = kind === 'dns' ? Object.keys(PHASES).filter(p => r[p][bib]) : [];
+    if (had.length) msgs.push('is already checked');
+    if (msgs.length) {
+      const fix = [r[other][bib] ? `clear ${STATUS[other]}` : '', had.length ? 'remove the check' : ''].filter(Boolean).join(' and ');
+      if (!confirm(`${label} ${msgs.join(' and ')}. Mark as ${name}, ${fix}?`)) return;
     }
-    r.dns[bib] = new Date().toISOString();
+    if (r[other][bib]) { cleared[other] = r[other][bib]; delete r[other][bib]; }
+    for (const p of had) { cleared[p] = r[p][bib]; delete r[p][bib]; }
+    r[kind][bib] = new Date().toISOString();
   }
   saveRaces();
   renderRace();
-  toast(`${label} ${before ? 'DNS removed' : 'marked DNS'}`, { id: currentId, bib, field: 'dns', before, cleared });
+  toast(`${label} ${before ? name + ' removed' : 'marked ' + name}`, { id: currentId, bib, field: kind, before, cleared });
 }
 
 function setPhase(phase) {
@@ -581,10 +595,10 @@ function exportCsv() {
   const q = v => /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
   const at = v => v ? new Date(v).toLocaleString() : '';
   const lines = [head.join(',')].concat(r.riders.map(x => {
-    const dns = isDns(r, x.bib), k = checkOf(r, x.bib);
+    const st = statusOf(r, x.bib), k = checkOf(r, x.bib);
     return [
       x.start, x.outfit, x.bib, x.name, x.team, x.uciId, x.nat, x.yob, x.wcs, x.uci,
-      dns ? 'DNS' : k ? 'Checked' : 'Not checked', k ? PHASES[k.phase] : '', k ? at(k.at) : '',
+      st ? STATUS[st] : k ? 'Checked' : 'Not checked', k ? PHASES[k.phase] : '', k ? at(k.at) : '',
     ].map(v => q(String(v ?? ''))).join(',');
   }));
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
@@ -621,8 +635,8 @@ $('#fileInput').onchange = async e => {
 $('#backBtn').onclick = renderHome;
 $('#raceList').onclick = e => { const c = e.target.closest('.race-card'); if (c) openRace(c.dataset.id); };
 $('#rows').onclick = e => {
-  const d = e.target.closest('[data-dns]');
-  if (d) return toggleDns(d.dataset.dns);
+  const d = e.target.closest('[data-dns],[data-dnf]');
+  if (d) return d.dataset.dns ? toggleStatus(d.dataset.dns, 'dns') : toggleStatus(d.dataset.dnf, 'dnf');
   const tr = e.target.closest('tr.rider');
   if (!tr) return;
   toggle(tr.dataset.bib);
@@ -648,8 +662,8 @@ $('#filterSeg').onclick = e => {
 $('#moreBtn').onclick = () => $('#moreTools').classList.toggle('hidden');
 $('#exportBtn').onclick = exportCsv;
 $('#resetBtn').onclick = () => {
-  if (!confirm('Clear every check and DNS mark for this race?')) return;
-  Object.assign(races[currentId], { pre: {}, post: {}, dns: {} }); saveRaces(); renderRace();
+  if (!confirm('Clear every check, DNS and DNF mark for this race?')) return;
+  Object.assign(races[currentId], { pre: {}, post: {}, dns: {}, dnf: {} }); saveRaces(); renderRace();
 };
 $('#deleteBtn').onclick = () => {
   if (!confirm('Remove this race and its checks from the iPad?')) return;
