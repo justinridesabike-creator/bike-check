@@ -130,6 +130,7 @@ table.sl tr.rider.dnf td.chk-td { opacity: 1; }
     <p>Everything is stored on this iPad and works without a connection.</p>
   </div>
   <div id="raceList" class="races"></div>
+  <p class="footer-note" id="appVersion"></p>
 </main>
 
 <!-- Race checklist -->
@@ -678,8 +679,20 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
+const APP_VERSION = 9;
+$('#appVersion').textContent = `Bike Check version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+    .then(reg => reg.update()).catch(() => {});
+  // When a new version takes over, reload once so the new screens appear without another restart.
+  let reloaded = false;
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
 }
 // Ask the browser not to evict our saved data.
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
