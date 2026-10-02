@@ -79,7 +79,6 @@ td.bib { font-size: 22px; font-weight: 800; text-align: right; font-variant-nume
 .check { width: 44px; height: 44px; border-radius: 12px; border: 2px solid var(--line); display: inline-flex;
   align-items: center; justify-content: center; font-size: 26px; font-weight: 900; color: transparent; }
 tr .check.on { background: var(--done); border-color: var(--done); color: #fff; }
-td.chk-cell:not(.active) .check { width: 36px; height: 36px; font-size: 20px; opacity: .75; }
 th.chk-head.active { color: var(--accent); }
 .phase-seg { align-self: center; }
 .phase-line { display: flex; justify-content: space-between; font-size: 14px; margin-top: 10px; }
@@ -502,6 +501,8 @@ function toggle(bib, phase) {
     delete r[phase][bib];
   } else {
     r[phase][bib] = new Date().toISOString();
+    // Checking a box from the other phase switches modes, so the row highlights the same way a pre check does.
+    r.phase = phase;
   }
   saveRaces();
   renderRace();

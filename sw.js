@@ -1,5 +1,5 @@
 // Offline cache: bump VERSION whenever app files change so iPads pick up the update.
-const VERSION = 'bikecheck-v3';
+const VERSION = 'bikecheck-v4';
 const FILES = ['./', 'index.html', 'manifest.json', 'icon-180.png', 'icon-512.png',
   'vendor/pdf.min.js', 'vendor/pdf.worker.min.js'];
 
