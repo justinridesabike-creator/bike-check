@@ -78,11 +78,14 @@ td.bib { font-size: 22px; font-weight: 800; text-align: right; font-variant-nume
 .uciid { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; }
 .check { width: 44px; height: 44px; border-radius: 12px; border: 2px solid var(--line); display: inline-flex;
   align-items: center; justify-content: center; font-size: 26px; font-weight: 900; color: transparent; }
-tr .check.on { background: var(--done); border-color: var(--done); color: #fff; }
-th.chk-head.active { color: var(--accent); }
+tr.done .check { background: var(--done); border-color: var(--done); color: #fff; }
+.ptag { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .04em; padding: 1px 5px; border-radius: 5px;
+  color: #fff; margin-right: 3px; }
+.ptag.pre { background: var(--done); }
+.ptag.post { background: var(--accent); }
 .phase-seg { align-self: center; }
-.phase-line { display: flex; justify-content: space-between; font-size: 14px; margin-top: 10px; }
-.phase-line + .progress { margin-top: 4px; }
+.race-card .count { margin-top: 6px; font-size: 14px; font-weight: 600; }
+.race-card .split { color: var(--muted); font-weight: 500; }
 .when { font-size: 11px; color: var(--muted); display: block; text-align: center; margin-top: 2px; min-height: 13px; }
 .dns-btn { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 8px 10px;
   font-size: 13px; font-weight: 700; color: var(--muted); cursor: pointer; }
@@ -164,13 +167,12 @@ tr.dns .check { border-style: dashed; }
         <th class="num hide-sm">WCS</th>
         <th class="num hide-sm">UCI</th>
         <th class="ctr">DNS</th>
-        <th class="ctr chk-head" data-phase="pre">Pre</th>
-        <th class="ctr chk-head" data-phase="post">Post</th>
+        <th class="ctr">Checked</th>
       </tr>
     </thead>
     <tbody id="rows"></tbody>
   </table>
-  <p class="footer-note">Tap a rider to check the current mode (Pre-race / Post-race), or tap a specific box. Tap DNS for a known non-starter.</p>
+  <p class="footer-note">Tap a rider to check them off. The Pre-race / Post-race switch sets the label on new checks. Tap DNS for a known non-starter.</p>
 </section>
 
 <div id="toast" class="toast hidden"><span id="toastMsg"></span><button id="toastUndo">Undo</button></div>
@@ -367,12 +369,27 @@ let currentId = null;
 let filter = 'all';
 
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
-// DNS riders drop out of the total: progress is checked / (starters - DNS), tracked separately for pre and post.
+// Each rider gets one check, labelled pre or post by when it was done; both count toward the same total.
+// DNS riders drop out of the total: progress is checked / (starters - DNS).
 function isDns(r, bib) { return !!(r.dns && r.dns[bib]); }
-function counts(r, phase) {
-  const dns = r.riders.filter(x => isDns(r, x.bib)).length;
-  const done = r.riders.filter(x => !isDns(r, x.bib) && r[phase][x.bib]).length;
-  return { done, total: r.riders.length - dns, dns };
+function checkOf(r, bib) {
+  if (isDns(r, bib)) return null;
+  if (r.pre[bib]) return { phase: 'pre', at: r.pre[bib] };
+  if (r.post[bib]) return { phase: 'post', at: r.post[bib] };
+  return null;
+}
+function counts(r) {
+  const c = { done: 0, pre: 0, post: 0, dns: 0, total: 0 };
+  for (const x of r.riders) {
+    if (isDns(r, x.bib)) { c.dns++; continue; }
+    c.total++;
+    const k = checkOf(r, x.bib);
+    if (k) { c.done++; c[k.phase]++; }
+  }
+  return c;
+}
+function splitText(c) {
+  return [c.pre ? `${c.pre} pre` : '', c.post ? `${c.post} post` : '', c.dns ? `${c.dns} DNS` : ''].filter(Boolean).join(' · ');
 }
 function countText(c) { return `${c.done} / ${c.total}`; }
 function raceTitle(r) { return r.meta.category || r.fileName; }
@@ -397,13 +414,12 @@ function renderHome() {
   const list = Object.values(races).sort((a, b) => sortKey(a) < sortKey(b) ? -1 : 1);
   $('#emptyState').classList.toggle('hidden', list.length > 0);
   $('#raceList').innerHTML = list.map(r => {
-    const pre = counts(r, 'pre'), post = counts(r, 'post');
-    const bar = (c, p) => `<div class="phase-line"><span>${PHASES[p]}</span><b>${countText(c)}${c.done === c.total ? ' ✓' : ''}</b></div>
-      <div class="progress"><div style="width:${c.total ? c.done / c.total * 100 : 100}%"></div></div>`;
-    return `<div class="race-card ${pre.done === pre.total && post.done === post.total ? 'complete' : ''}" data-id="${esc(r.id)}">
+    const c = counts(r), complete = c.done === c.total, split = splitText(c);
+    return `<div class="race-card ${complete ? 'complete' : ''}" data-id="${esc(r.id)}">
       <div class="cat">${esc(raceTitle(r))}</div>
-      <div class="meta">${esc(raceSub(r))}${pre.dns ? ` · ${pre.dns} DNS` : ''}</div>
-      ${bar(pre, 'pre')}${bar(post, 'post')}
+      <div class="meta">${esc(raceSub(r))}</div>
+      <div class="progress"><div style="width:${c.total ? c.done / c.total * 100 : 100}%"></div></div>
+      <div class="count">${countText(c)} checked${complete ? ' ✓' : ''}${split ? ` <span class="split">· ${split}</span>` : ''}</div>
     </div>`;
   }).join('');
 }
@@ -426,11 +442,9 @@ function fmtTime(iso) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function checkCell(r, x, phase, dns) {
-  const c = !dns && r[phase][x.bib];
-  const active = r.phase === phase ? 'active' : '';
-  return `<td class="ctr chk-cell ${active}" data-phase="${phase}">
-    <span class="check ${c ? 'on' : ''}">${dns ? '' : '✓'}</span><span class="when">${c ? fmtTime(c) : ''}</span></td>`;
+function checkCell(k, dns) {
+  const when = k ? `<span class="ptag ${k.phase}">${k.phase.toUpperCase()}</span>${fmtTime(k.at)}` : '';
+  return `<td class="ctr"><span class="check">${dns ? '' : '✓'}</span><span class="when">${when}</span></td>`;
 }
 
 function renderRace() {
@@ -439,18 +453,14 @@ function renderRace() {
   const phase = r.phase;
   $('#title').textContent = raceTitle(r);
   document.querySelectorAll('#phaseSeg button').forEach(b => b.classList.toggle('on', b.dataset.p === phase));
-  const cnt = counts(r, phase), other = counts(r, phase === 'pre' ? 'post' : 'pre');
+  const cnt = counts(r);
   $('#rvCount').textContent = countText(cnt);
-  $('#rvSub').textContent = [
-    `${PHASES[phase === 'pre' ? 'post' : 'pre']} ${countText(other)}`,
-    cnt.dns ? `${cnt.dns} DNS` : '', raceSub(r),
-  ].filter(Boolean).join(' · ');
+  $('#rvSub').textContent = [splitText(cnt), raceSub(r)].filter(Boolean).join(' · ');
   $('#rvBar').style.width = (cnt.total ? cnt.done / cnt.total * 100 : 100) + '%';
-  document.querySelectorAll('th[data-phase]').forEach(th => th.classList.toggle('active', th.dataset.phase === phase));
   const q = $('#search').value.trim().toLowerCase();
   const rows = r.riders.filter(x => {
     const dns = isDns(r, x.bib);
-    const done = !dns && !!r[phase][x.bib];
+    const done = !!checkOf(r, x.bib);
     if (filter === 'todo' && (done || dns)) return false;
     if (filter === 'done' && !done) return false;
     if (!q) return true;
@@ -459,7 +469,7 @@ function renderRace() {
   });
   $('#rows').innerHTML = rows.map(x => {
     const dns = isDns(r, x.bib);
-    const done = !dns && r[phase][x.bib];
+    const k = checkOf(r, x.bib), done = !!k;
     return `<tr class="rider ${done ? 'done' : ''} ${dns ? 'dns' : ''}" data-bib="${esc(x.bib)}">
       <td class="num">${esc(x.start)}${x.flag ? ` <span class="flag">${esc(x.flag)}</span>` : ''}</td>
       <td class="ctr hide-sm">${x.outfit ? `<span class="outfit">${esc(x.outfit)}</span>` : ''}</td>
@@ -471,9 +481,9 @@ function renderRace() {
       <td class="num hide-sm">${esc(x.wcs)}</td>
       <td class="num hide-sm">${esc(x.uci)}</td>
       <td class="ctr dns-cell"><button class="dns-btn" data-dns="${esc(x.bib)}">DNS</button></td>
-      ${checkCell(r, x, 'pre', dns)}${checkCell(r, x, 'post', dns)}
+      ${checkCell(k, dns)}
     </tr>`;
-  }).join('') || `<tr><td colspan="12" class="ctr" style="padding:30px;color:var(--muted)">No riders match.</td></tr>`;
+  }).join('') || `<tr><td colspan="11" class="ctr" style="padding:30px;color:var(--muted)">No riders match.</td></tr>`;
 }
 
 let undoState = null, toastTimer = null;
@@ -487,26 +497,25 @@ function toast(msg, undo) {
 }
 
 let lastTap = { key: null, t: 0 };
-function toggle(bib, phase) {
-  // Ignore an accidental double-tap on the same box, which would otherwise check then immediately ask to uncheck.
-  const now = Date.now(), key = bib + phase;
-  if (lastTap.key === key && now - lastTap.t < 600) return;
-  lastTap = { key, t: now };
+function toggle(bib) {
+  // Ignore an accidental double-tap on the same rider, which would otherwise check then immediately ask to uncheck.
+  const now = Date.now();
+  if (lastTap.key === bib && now - lastTap.t < 600) return;
+  lastTap = { key: bib, t: now };
   const r = races[currentId];
   const label = riderLabel(r, bib);
   if (isDns(r, bib)) { toast(`${label} is DNS. Tap DNS to clear it first.`); return; }
-  const before = r[phase][bib] || null;
-  if (before) {
-    if (!confirm(`Uncheck ${PHASES[phase]} for ${label}?\n\nChecked at ${fmtTime(before)}.`)) return;
-    delete r[phase][bib];
+  const k = checkOf(r, bib);
+  if (k) {
+    if (!confirm(`Uncheck ${label}?\n\n${PHASES[k.phase]} check at ${fmtTime(k.at)}.`)) return;
+    delete r.pre[bib]; delete r.post[bib];
+    saveRaces(); renderRace();
+    toast(`${label} unchecked`, { id: currentId, bib, field: k.phase, before: k.at });
   } else {
-    r[phase][bib] = new Date().toISOString();
-    // Checking a box from the other phase switches modes, so the row highlights the same way a pre check does.
-    r.phase = phase;
+    r[r.phase][bib] = new Date().toISOString();
+    saveRaces(); renderRace();
+    toast(`${label} checked ${PHASES[r.phase].toLowerCase()}`, { id: currentId, bib, field: r.phase, before: null });
   }
-  saveRaces();
-  renderRace();
-  toast(`${label} ${PHASES[phase]} ${before ? 'unchecked' : 'checked'}`, { id: currentId, bib, field: phase, before });
 }
 
 function toggleDns(bib) {
@@ -521,7 +530,7 @@ function toggleDns(bib) {
     // A DNS rider can't also be checked; if they were, confirm and clear the checks.
     const had = Object.keys(PHASES).filter(p => r[p][bib]);
     if (had.length) {
-      if (!confirm(`${label} already has a ${had.map(p => PHASES[p]).join(' and ')} check. Mark as DNS and remove it?`)) return;
+      if (!confirm(`${label} is already checked. Mark as DNS and remove the check?`)) return;
       for (const p of had) { cleared[p] = r[p][bib]; delete r[p][bib]; }
     }
     r.dns[bib] = new Date().toISOString();
@@ -542,14 +551,14 @@ function setPhase(phase) {
 function exportCsv() {
   const r = races[currentId];
   const head = ['Start', 'Outfit', 'Nr', 'Name', 'Team', 'UCI ID', 'NAT', 'YOB', 'WCS', 'UCI',
-    'DNS', 'Pre-race', 'Pre-race At', 'Post-race', 'Post-race At'];
+    'Status', 'Checked', 'Checked At'];
   const q = v => /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
   const at = v => v ? new Date(v).toLocaleString() : '';
   const lines = [head.join(',')].concat(r.riders.map(x => {
-    const dns = isDns(r, x.bib), pre = !dns && r.pre[x.bib], post = !dns && r.post[x.bib];
+    const dns = isDns(r, x.bib), k = checkOf(r, x.bib);
     return [
       x.start, x.outfit, x.bib, x.name, x.team, x.uciId, x.nat, x.yob, x.wcs, x.uci,
-      dns ? 'DNS' : '', pre ? 'Yes' : 'No', at(pre), post ? 'Yes' : 'No', at(post),
+      dns ? 'DNS' : k ? 'Checked' : 'Not checked', k ? PHASES[k.phase] : '', k ? at(k.at) : '',
     ].map(v => q(String(v ?? ''))).join(',');
   }));
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
@@ -590,9 +599,7 @@ $('#rows').onclick = e => {
   if (d) return toggleDns(d.dataset.dns);
   const tr = e.target.closest('tr.rider');
   if (!tr) return;
-  // Tapping a specific box checks that phase; tapping anywhere else on the row checks the current mode.
-  const cell = e.target.closest('td[data-phase]');
-  toggle(tr.dataset.bib, cell ? cell.dataset.phase : races[currentId].phase);
+  toggle(tr.dataset.bib);
 };
 $('#phaseSeg').onclick = e => { const b = e.target.closest('button'); if (b) setPhase(b.dataset.p); };
 $('#search').oninput = renderRace;
@@ -605,7 +612,7 @@ $('#filterSeg').onclick = e => {
 $('#moreBtn').onclick = () => $('#moreTools').classList.toggle('hidden');
 $('#exportBtn').onclick = exportCsv;
 $('#resetBtn').onclick = () => {
-  if (!confirm('Clear every pre-race check, post-race check and DNS mark for this race?')) return;
+  if (!confirm('Clear every check and DNS mark for this race?')) return;
   Object.assign(races[currentId], { pre: {}, post: {}, dns: {} }); saveRaces(); renderRace();
 };
 $('#deleteBtn').onclick = () => {
