@@ -83,6 +83,13 @@ tr.done .check { background: var(--done); border-color: var(--done); color: #fff
   color: #fff; margin-right: 3px; }
 .ptag.pre { background: var(--done); }
 .ptag.post { background: var(--accent); }
+td.res { text-align: center; font-weight: 800; font-size: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.res .rs { display: inline-block; font-size: 12px; font-weight: 800; padding: 2px 6px; border-radius: 6px; background: var(--chip); }
+td.res .rs.bad { background: var(--danger); color: #fff; }
+td.res .rs.dnf { background: var(--dnf); color: #fff; }
+td.res .live { display: block; font-size: 10px; font-weight: 700; color: var(--done); }
+.live-note { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.live-note b { color: var(--ink); }
 .phase-seg { align-self: center; }
 .phase-note { font-size: 13px; color: var(--muted); align-self: center; }
 .phase-note button { border: 0; background: none; color: var(--accent); font-weight: 700; padding: 4px; cursor: pointer; }
@@ -97,7 +104,7 @@ table.sl tr.rider.out .nm { text-decoration: line-through; }
 tr.dns .dns-btn[data-dns] { background: var(--danger); border-color: var(--danger); color: #fff; }
 tr.dnf .dns-btn[data-dnf] { background: var(--dnf); border-color: var(--dnf); color: #fff; }
 tr.dns .check { border-style: dashed; }
-table.sl tr.rider.dnf td.chk-td { opacity: 1; }
+table.sl tr.rider.dnf td.chk-td, table.sl tr.rider.out td.res { opacity: 1; }
 .dns-cell { white-space: nowrap; }
 
 @media (max-width: 900px) {
@@ -146,6 +153,7 @@ table.sl tr.rider.dnf td.chk-td { opacity: 1; }
       <span class="sub" id="rvSub"></span>
     </div>
     <div class="progress"><div id="rvBar"></div></div>
+    <div class="live-note" id="liveNote"></div>
     <div class="tools">
       <input id="search" type="search" placeholder="Bib, name, team or nation" autocomplete="off" inputmode="search">
       <div class="seg" id="filterSeg">
@@ -173,6 +181,7 @@ table.sl tr.rider.dnf td.chk-td { opacity: 1; }
         <th class="num hide-md">YOB</th>
         <th class="num hide-sm">WCS</th>
         <th class="num hide-sm">UCI</th>
+        <th class="ctr">Result</th>
         <th class="ctr">DNS / DNF</th>
         <th class="ctr">Checked</th>
       </tr>
@@ -201,7 +210,7 @@ let races = loadRaces();
 // Older saves had one "checks" map; it becomes the pre-race checks.
 for (const r of Object.values(races)) {
   if (r.checks) { r.pre = r.pre || r.checks; delete r.checks; }
-  r.pre = r.pre || {}; r.post = r.post || {}; r.dns = r.dns || {}; r.dnf = r.dnf || {}; delete r.phase;
+  r.pre = r.pre || {}; r.post = r.post || {}; r.dns = r.dns || {}; r.dnf = r.dnf || {}; r.auto = r.auto || {}; r.autoDismissed = r.autoDismissed || {}; delete r.phase;
 }
 
 /* ---------- PDF parsing ---------- */
@@ -358,8 +367,9 @@ async function importFile(file) {
   const id = [meta.date, meta.discipline, meta.category, meta.startTime].filter(Boolean).join(' | ') || file.name;
   const existing = races[id];
   // Re-importing a revised start list keeps checks and DNS marks for bibs that are still on it.
-  const keep = existing ? { pre: existing.pre, post: existing.post, dns: existing.dns, dnf: existing.dnf || {}, manualPhase: existing.manualPhase }
-    : { pre: {}, post: {}, dns: {}, dnf: {} };
+  const keep = existing ? { pre: existing.pre, post: existing.post, dns: existing.dns, dnf: existing.dnf || {}, manualPhase: existing.manualPhase,
+      auto: existing.auto || {}, autoDismissed: existing.autoDismissed || {}, live: existing.live, results: existing.results }
+    : { pre: {}, post: {}, dns: {}, dnf: {}, auto: {}, autoDismissed: {} };
   races[id] = {
     id, meta, riders, ...keep,
     fileName: file.name,
@@ -462,6 +472,8 @@ function openRace(id) {
   $('#backBtn').classList.remove('hidden');
   renderRace();
   window.scrollTo(0, 0);
+  const ls = liveState[id];
+  if (!ls || !ls.lastTry || Date.now() - ls.lastTry > 15000) refreshLive(id);
 }
 
 function fmtTime(iso) {
@@ -489,8 +501,9 @@ function renderRace() {
   $('#rvCount').textContent = countText(cnt);
   $('#rvSub').textContent = [splitText(cnt), raceSub(r)].filter(Boolean).join(' · ');
   $('#rvBar').style.width = (cnt.total ? cnt.done / cnt.total * 100 : 100) + '%';
+  $('#liveNote').innerHTML = liveNoteHtml(r);
   const q = $('#search').value.trim().toLowerCase();
-  const rows = r.riders.filter(x => {
+  const rows = orderedRiders(r).filter(x => {
     const done = !!checkOf(r, x.bib);
     if (filter === 'todo' && (done || isDns(r, x.bib))) return false;
     if (filter === 'done' && !done) return false;
@@ -511,11 +524,12 @@ function renderRace() {
       <td class="num hide-md">${esc(x.yob)}</td>
       <td class="num hide-sm">${esc(x.wcs)}</td>
       <td class="num hide-sm">${esc(x.uci)}</td>
+      ${resultCell(r, x.bib)}
       <td class="ctr dns-cell"><button class="dns-btn" data-dns="${esc(x.bib)}">DNS</button>
         <button class="dns-btn" data-dnf="${esc(x.bib)}">DNF</button></td>
       ${checkCell(k, st === 'dns')}
     </tr>`;
-  }).join('') || `<tr><td colspan="11" class="ctr" style="padding:30px;color:var(--muted)">No riders match.</td></tr>`;
+  }).join('') || `<tr><td colspan="12" class="ctr" style="padding:30px;color:var(--muted)">No riders match.</td></tr>`;
 }
 
 let undoState = null, toastTimer = null;
@@ -560,7 +574,10 @@ function toggleStatus(bib, kind) {
   if (before) {
     if (!confirm(`Remove ${name} for ${label}?`)) return;
     delete r[kind][bib];
+    // Don't let live timing put back a mark the user removed.
+    if (r.auto[bib] === kind) { r.autoDismissed[bib] = kind; delete r.auto[bib]; }
   } else {
+    delete r.auto[bib];
     const msgs = [];
     if (r[other][bib]) msgs.push(`is marked ${STATUS[other]}`);
     // A DNS rider never raced, so any check is removed. A DNF rider keeps a check made before they dropped out.
@@ -591,7 +608,7 @@ function setPhase(phase) {
 function exportCsv() {
   const r = races[currentId];
   const head = ['Start', 'Outfit', 'Nr', 'Name', 'Team', 'UCI ID', 'NAT', 'YOB', 'WCS', 'UCI',
-    'Status', 'Checked', 'Checked At'];
+    'Status', 'Checked', 'Checked At', 'Result'];
   const q = v => /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
   const at = v => v ? new Date(v).toLocaleString() : '';
   const lines = [head.join(',')].concat(r.riders.map(x => {
@@ -599,6 +616,7 @@ function exportCsv() {
     return [
       x.start, x.outfit, x.bib, x.name, x.team, x.uciId, x.nat, x.yob, x.wcs, x.uci,
       st ? STATUS[st] : k ? 'Checked' : 'Not checked', k ? PHASES[k.phase] : '', k ? at(k.at) : '',
+      resultLabel(r.results && r.results.byBib[x.bib]),
     ].map(v => q(String(v ?? ''))).join(',');
   }));
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
@@ -612,6 +630,168 @@ function exportCsv() {
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
 }
+
+/* ---------- Live results (ChronoRace) ---------- */
+// The UCI live timing site (live.ucimtbworldseries.com) embeds ChronoRace. Its JSON feeds allow cross-origin reads:
+//   event menu:  api/results/uci/dh/cms/<event>        e.g. 20261002_mtb (the event's first day)
+//   per race:    api/results/xco/<event>/overview/<key> and /registration/<key>   (key e.g. XCCWE, ME)
+// Riders are matched by UCI ID because live bibs can differ from the start list (bib 6 showed as 666).
+const CR_API = 'https://prod.chronorace.be/api/results/';
+const liveState = {};          // per race id: { busy, lastTry, error }
+function crGet(path) {
+  return fetch(CR_API + path, { cache: 'no-store' }).then(res => {
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  });
+}
+function ymd(d) { return d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0'); }
+
+async function findLiveRace(r) {
+  const disc = /SHORT TRACK/i.test(r.meta.discipline || '') ? 'XCC' : /DOWNHILL/i.test(r.meta.discipline || '') ? null : 'XCO';
+  const st = startDate(r);
+  if (!disc || !st || !r.meta.category) return null;
+  // The event folder is named after the event's first day, so look back a few days from this race.
+  for (let back = 0; back <= 4; back++) {
+    const d = new Date(st); d.setDate(d.getDate() - back);
+    const event = ymd(d) + '_mtb';
+    const cms = await crGet('uci/dh/cms/' + event).catch(() => null);
+    if (!cms) continue;
+    const discNode = (cms.Childs || []).find(c => c.Id === disc);
+    const cat = discNode && (discNode.Childs || []).find(c => (c.DisplayName || '').toLowerCase() === r.meta.category.toLowerCase());
+    if (!cat) continue;
+    let key = null;
+    (function walk(n) {
+      if (key) return;
+      if (n.Route) { try { key = JSON.parse(n.Route).Params.key; } catch (e) {} }
+      (n.Childs || []).forEach(walk);
+    })(cat);
+    if (key) return { event, key };
+  }
+  return null;
+}
+
+function resultLabel(res) {
+  if (!res) return '';
+  if (res.status === 'OK') return res.pos ? String(res.pos) : '';
+  if (res.status === 'R80') return '-80%';
+  return res.status;
+}
+
+async function refreshLive(id) {
+  const r = races[id];
+  const ls = liveState[id] || (liveState[id] = {});
+  if (!r || ls.busy) return;
+  ls.busy = true; ls.lastTry = Date.now();
+  try {
+    if (!r.live) {
+      r.live = await findLiveRace(r);
+      if (!r.live) { ls.error = 'not found'; return; }
+      saveRaces();
+    }
+    const [ov, reg] = await Promise.all([
+      crGet(`xco/${r.live.event}/overview/${r.live.key}`),
+      crGet(`xco/${r.live.event}/registration/${r.live.key}`),
+    ]);
+    ls.error = null;
+    if (!ov || !ov.OverviewData) { ls.waiting = true; return; }
+    ls.waiting = false;
+    const byDossard = {};
+    for (const row of ov.OverviewData) byDossard[row.Dossard] = row;
+    const byUci = {};
+    for (const reg1 of Object.values(reg || {})) if (reg1.RiderId) byUci[reg1.RiderId] = reg1.Dossard;
+    const byBib = {};
+    for (const x of r.riders) {
+      let dos = x.uciId && byUci[x.uciId];
+      if (!dos) { const m = ov.OverviewData.find(o => o.Dossard % 1000 === +x.bib); dos = m && m.Dossard; }
+      const row = dos && byDossard[dos];
+      if (row) byBib[x.bib] = { pos: row.Pos, status: row.Status, inRace: !!row.InRace };
+    }
+    r.results = { byBib, status: ov.Status, curLap: ov.CurLap, maxLaps: ov.MaxLaps, at: new Date().toISOString() };
+    applyAutoStatus(r);
+    saveRaces();
+  } catch (e) {
+    ls.error = navigator.onLine === false ? 'offline' : 'error';
+  } finally {
+    ls.busy = false;
+    if (currentId === id) renderRace();
+  }
+}
+
+// Timing DNS/DNF become app DNS/DNF. Manual marks are never overwritten, a mark the user removed is not re-applied,
+// and a rider whose bike is already checked is not auto-marked DNS (that would delete the check).
+function applyAutoStatus(r) {
+  const added = [];
+  for (const x of r.riders) {
+    const res = r.results.byBib[x.bib];
+    const want = res && res.status === 'DNS' ? 'dns' : res && res.status === 'DNF' ? 'dnf' : null;
+    const cur = statusOf(r, x.bib);
+    if (want) {
+      if (cur || r.autoDismissed[x.bib] === want) continue;
+      if (want === 'dns' && checkOf(r, x.bib)) continue;
+      r[want][x.bib] = new Date().toISOString();
+      r.auto[x.bib] = want;
+      added.push(`#${x.bib} ${STATUS[want]}`);
+    } else if (r.auto[x.bib] && cur === r.auto[x.bib]) {
+      // Timing corrected itself: take back our automatic mark.
+      delete r[cur][x.bib];
+      delete r.auto[x.bib];
+    }
+  }
+  if (added.length && races[currentId] === r) toast('Live timing marked ' + added.join(', '));
+}
+
+// From the leader's last lap on (and once finished), list riders in result order instead of start order.
+function sortedByResult(r) {
+  const res = r.results;
+  return !!res && (res.status === 'Finished' || (res.maxLaps > 0 && res.curLap >= res.maxLaps));
+}
+function orderedRiders(r) {
+  if (!sortedByResult(r)) return r.riders;
+  const rank = x => {
+    const res = r.results.byBib[x.bib];
+    if (!res) return 1e6 + (+x.start || 0);
+    if (res.status === 'DNS') return 1e5 + (res.pos || 0);
+    return res.pos || 5e4;
+  };
+  return [...r.riders].sort((a, b) => rank(a) - rank(b));
+}
+
+function resultCell(r, bib) {
+  const res = r.results && r.results.byBib[bib];
+  if (!res) return '<td class="res"></td>';
+  const label = resultLabel(res);
+  if (res.status === 'OK') return `<td class="res">${esc(label)}${res.inRace ? '<span class="live">LIVE</span>' : ''}</td>`;
+  const cls = res.status === 'DNF' ? 'dnf' : res.status === 'R80' ? '' : 'bad';
+  return `<td class="res"><span class="rs ${cls}">${esc(label)}</span></td>`;
+}
+
+function liveNoteHtml(r) {
+  const ls = liveState[r.id] || {};
+  const res = r.results;
+  const parts = [];
+  if (res) {
+    if (res.status === 'Finished') parts.push('<b>Finished</b>');
+    else if (res.maxLaps) parts.push(`<b>Lap ${res.curLap} / ${res.maxLaps}</b>`);
+    parts.push('updated ' + fmtTime(res.at));
+    if (sortedByResult(r)) parts.push('sorted by result');
+  }
+  if (ls.error === 'offline') parts.push('offline, showing last results');
+  else if (ls.error === 'error') parts.push('could not reach live timing');
+  else if (ls.error === 'not found') parts.push('race not found on live timing yet');
+  else if (ls.waiting && !res) parts.push('waiting for the race to start');
+  else if (!res && ls.busy) parts.push('connecting…');
+  return parts.length ? 'Live timing: ' + parts.join(' · ') : '';
+}
+
+// Poll the open race: every 20s while racing, every 2 min once finished, and retry a missing race every 2 min.
+setInterval(() => {
+  if (!currentId || document.visibilityState !== 'visible') return;
+  const r = races[currentId], ls = liveState[currentId] || {};
+  if (!r) return;
+  const finished = r.results && r.results.status === 'Finished';
+  const wait = (finished || ls.error === 'not found') ? 120000 : 20000;
+  if (!ls.lastTry || Date.now() - ls.lastTry >= wait) refreshLive(currentId);
+}, 5000);
 
 /* ---------- Events ---------- */
 $('#importBtn').onclick = () => $('#fileInput').click();
@@ -679,7 +859,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 9;
+const APP_VERSION = 10;
 $('#appVersion').textContent = `Bike Check version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
