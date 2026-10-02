@@ -84,6 +84,8 @@ tr.done .check { background: var(--done); border-color: var(--done); color: #fff
 .ptag.pre { background: var(--done); }
 .ptag.post { background: var(--accent); }
 .phase-seg { align-self: center; }
+.phase-note { font-size: 13px; color: var(--muted); align-self: center; }
+.phase-note button { border: 0; background: none; color: var(--accent); font-weight: 700; padding: 4px; cursor: pointer; }
 .race-card .count { margin-top: 6px; font-size: 14px; font-weight: 600; }
 .race-card .split { color: var(--muted); font-weight: 500; }
 .when { font-size: 11px; color: var(--muted); display: block; text-align: center; margin-top: 2px; min-height: 13px; }
@@ -135,6 +137,7 @@ tr.dns .check { border-style: dashed; }
         <button data-p="pre" class="on">Pre-race</button>
         <button data-p="post">Post-race</button>
       </div>
+      <span class="phase-note" id="phaseNote"></span>
       <span class="bigcount" id="rvCount">0 / 0</span>
       <span class="sub" id="rvSub"></span>
     </div>
@@ -194,7 +197,7 @@ let races = loadRaces();
 // Older saves had one "checks" map; it becomes the pre-race checks.
 for (const r of Object.values(races)) {
   if (r.checks) { r.pre = r.pre || r.checks; delete r.checks; }
-  r.pre = r.pre || {}; r.post = r.post || {}; r.dns = r.dns || {}; r.phase = r.phase || 'pre';
+  r.pre = r.pre || {}; r.post = r.post || {}; r.dns = r.dns || {}; delete r.phase;
 }
 
 /* ---------- PDF parsing ---------- */
@@ -351,8 +354,8 @@ async function importFile(file) {
   const id = [meta.date, meta.discipline, meta.category, meta.startTime].filter(Boolean).join(' | ') || file.name;
   const existing = races[id];
   // Re-importing a revised start list keeps checks and DNS marks for bibs that are still on it.
-  const keep = existing ? { pre: existing.pre, post: existing.post, dns: existing.dns, phase: existing.phase }
-    : { pre: {}, post: {}, dns: {}, phase: 'pre' };
+  const keep = existing ? { pre: existing.pre, post: existing.post, dns: existing.dns, manualPhase: existing.manualPhase }
+    : { pre: {}, post: {}, dns: {} };
   races[id] = {
     id, meta, riders, ...keep,
     fileName: file.name,
@@ -367,6 +370,7 @@ const $ = s => document.querySelector(s);
 const PHASES = { pre: 'Pre-race', post: 'Post-race' };
 let currentId = null;
 let filter = 'all';
+let shownPhase = null;
 
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 // Each rider gets one check, labelled pre or post by when it was done; both count toward the same total.
@@ -400,6 +404,21 @@ function sortKey(r) {
   const d = Date.parse((r.meta.date || '').replace(/^\w+\s+/, '')) || 0;
   return d + ' ' + (r.meta.startTime || '').padStart(5, '0');
 }
+// Start time from the start list ("FRI 2 OCT 2026" + "12:35"), read in the iPad's local time zone.
+const MONTHS = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
+function startDate(r) {
+  const d = (r.meta.date || '').match(/(\d{1,2})\s+([A-Z]{3})\s+(\d{4})/i);
+  const t = (r.meta.startTime || '').match(/(\d{1,2}):(\d{2})/);
+  if (!d || !t || !(d[2].toUpperCase() in MONTHS)) return null;
+  return new Date(+d[3], MONTHS[d[2].toUpperCase()], +d[1], +t[1], +t[2]);
+}
+// Pre-race until the start time passes, then post-race, unless the user has tapped the switch to override.
+function autoPhase(r) {
+  const st = startDate(r);
+  if (!st) return 'pre';
+  return Date.now() >= st.getTime() ? 'post' : 'pre';
+}
+function currentPhase(r) { return r.manualPhase || autoPhase(r); }
 function riderLabel(r, bib) {
   const x = r.riders.find(x => x.bib === bib);
   return `#${bib} ${x ? x.name : ''}`;
@@ -450,7 +469,12 @@ function checkCell(k, dns) {
 function renderRace() {
   const r = races[currentId];
   if (!r) return renderHome();
-  const phase = r.phase;
+  const phase = currentPhase(r);
+  shownPhase = phase;
+  const st = startDate(r);
+  $('#phaseNote').innerHTML = r.manualPhase
+    ? `Manual <button id="autoBtn">Back to auto</button>`
+    : st ? (phase === 'pre' ? `Auto: switches to Post-race at ${fmtTime(st)}` : `Auto: Post-race since ${fmtTime(st)}`) : '';
   $('#title').textContent = raceTitle(r);
   document.querySelectorAll('#phaseSeg button').forEach(b => b.classList.toggle('on', b.dataset.p === phase));
   const cnt = counts(r);
@@ -512,9 +536,10 @@ function toggle(bib) {
     saveRaces(); renderRace();
     toast(`${label} unchecked`, { id: currentId, bib, field: k.phase, before: k.at });
   } else {
-    r[r.phase][bib] = new Date().toISOString();
+    const phase = currentPhase(r);
+    r[phase][bib] = new Date().toISOString();
     saveRaces(); renderRace();
-    toast(`${label} checked ${PHASES[r.phase].toLowerCase()}`, { id: currentId, bib, field: r.phase, before: null });
+    toast(`${label} checked ${PHASES[phase].toLowerCase()}`, { id: currentId, bib, field: phase, before: null });
   }
 }
 
@@ -542,8 +567,9 @@ function toggleDns(bib) {
 
 function setPhase(phase) {
   const r = races[currentId];
-  if (r.phase === phase) return;
-  r.phase = phase;
+  // Picking what auto would choose anyway just returns to auto.
+  if (phase === autoPhase(r)) delete r.manualPhase;
+  else r.manualPhase = phase;
   saveRaces();
   renderRace();
 }
@@ -602,6 +628,16 @@ $('#rows').onclick = e => {
   toggle(tr.dataset.bib);
 };
 $('#phaseSeg').onclick = e => { const b = e.target.closest('button'); if (b) setPhase(b.dataset.p); };
+$('#phaseNote').onclick = e => {
+  if (!e.target.closest('#autoBtn')) return;
+  delete races[currentId].manualPhase; saveRaces(); renderRace();
+};
+// Re-check every 30s so the mode flips to Post-race on its own when the start time passes.
+setInterval(() => {
+  if (!currentId || !races[currentId]) return;
+  const p = currentPhase(races[currentId]);
+  if (p !== shownPhase) { renderRace(); toast(`Start time passed: new checks are now ${PHASES[p]}`); }
+}, 30000);
 $('#search').oninput = renderRace;
 $('#filterSeg').onclick = e => {
   const b = e.target.closest('button'); if (!b) return;
