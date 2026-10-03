@@ -1042,6 +1042,9 @@ function crGet(path) {
     return res.json();
   });
 }
+// Sortable form of the feed's GeneratedDateTime ("2026-10-03T18:06:07.0892487+00:00"): the fraction is padded to
+// 7 digits so plain string comparison orders them (Safari can't parse 7-digit fractions as dates).
+function genKey(s) { return s ? String(s).replace(/\.(\d+)/, (m, f) => '.' + (f + '0000000').slice(0, 7)) : null; }
 function ymd(d) { return d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0'); }
 
 async function findLiveRace(r) {
@@ -1093,9 +1096,12 @@ async function refreshLive(id) {
     ]);
     ls.error = null;
     if (!ov || !ov.OverviewData) { ls.waiting = true; return; }
-    // Unchanged since the last check: nothing to recompute or redraw.
-    if (ov.GeneratedDateTime && ov.GeneratedDateTime === ls.lastGen && r.results && !ls.error) { ls.unchanged = true; return; }
-    ls.lastGen = ov.GeneratedDateTime;
+    // ChronoRace serves the feed from several servers that are not always in step: about 1 in 5 changed responses
+    // during the Lake Placid women's elite race was an older snapshot. Ignore anything not newer than what is shown,
+    // so riders never jump back. (Same snapshot: nothing to recompute or redraw.)
+    const gen = genKey(ov.GeneratedDateTime);
+    if (gen && ls.lastGen && gen <= ls.lastGen && r.results && !ls.error) { ls.unchanged = true; return; }
+    if (gen) ls.lastGen = gen;
     ls.waiting = false;
     if (reg && Object.keys(reg).length) ls.reg = reg;
     const byDossard = {};
@@ -1305,7 +1311,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 15;
+const APP_VERSION = 16;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
