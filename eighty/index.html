@@ -881,12 +881,18 @@ function zoneEta(r, bib) {
   let ref13 = at(Z);
   if (ref13 == null && refLap) { const share = zoneShare(r); if (share) ref13 = refLap * share; }
   if (ref13 == null) return null;
-  // Current pace against earlier laps at the latest checkpoint (kept within sensible bounds).
-  let pace = 1;
-  if (res.loc > 0 && res.inLap != null) { const ref = at(res.loc); if (ref) pace = Math.min(1.6, Math.max(0.8, res.inLap / ref)); }
-  if (res.loc < Z) return { t: lapStart + ref13 * pace, lap: n };
+  // Current pace against earlier laps at the latest checkpoint (kept within sensible bounds). Time already lost or
+  // gained this lap is in res.inLap; only the rest of the lap is projected, at the rider's usual time for that
+  // stretch adjusted by half of this lap's pace difference, so a slow start isn't stretched over the whole lap
+  // (Robbie Day, Lake Placid men's elite, was flagged at 80% from a few seconds lost by checkpoint 6).
+  let pace = 1, refLoc = null;
+  if (res.loc > 0 && res.inLap != null) { refLoc = at(res.loc); if (refLoc) pace = Math.min(1.6, Math.max(0.8, res.inLap / refLoc)); }
+  const rest = (refTo) => (refTo - refLoc) * (1 + (pace - 1) / 2);
+  const known = refLoc != null && res.inLap != null;
+  if (res.loc < Z) return { t: known && ref13 > refLoc ? lapStart + res.inLap + rest(ref13) : lapStart + ref13 * pace, lap: n };
   if (!refLap || (R.maxLaps && n >= R.maxLaps)) return null; // past the zone on the last lap: no more passes
-  return { t: lapStart + refLap * pace + ref13, lap: n + 1 };
+  const lapEnd = known && refLap > refLoc ? lapStart + res.inLap + rest(refLap) : lapStart + refLap * pace;
+  return { t: lapEnd + ref13, lap: n + 1 };
 }
 /* ---------- Likely pulls ---------- */
 // The leader's time at checkpoint 13 on a lap: recorded if it has happened (else worked out from the leader's lap
@@ -1557,7 +1563,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 29;
+const APP_VERSION = 30;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
