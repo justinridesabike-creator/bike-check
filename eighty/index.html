@@ -251,7 +251,7 @@ table.sl tr.zone-div b { margin-right: 18px; }
     as the timer; riders past it show their gap at checkpoint 13. <b>Live gap</b> follows timing round the course, with ▲ time lost or ▼ gained since checkpoint 13. Yellow: past 50% of the leader's first lap.
     Red: past 75%. PULL: past 80% (the pull time). Orange: losing more time than on their previous lap (crash or mechanical?). Pulsing blue: lapped, not at checkpoint 13 since your
     previous Leader through tap, so look for them.
-    Under each name: expected arrival at the 80% zone from the rider's earlier laps and current pace, and a forecast:
+    Under each name: when the rider should come into view at the 80% zone (12 seconds after checkpoint 13), from their earlier laps and current pace, and a forecast:
     <b>PULL LIKELY</b> if their projected gap there is past the pull time, <b>Possible pull</b> if past 75% or heading there. <b>SAFE</b>: took the bell (crossed the line after the leader started the last lap) or the leader has finished; no more pulls for them.
     <b>Pulled</b> only changes how a rider is shown.</p>
 </section>
@@ -877,15 +877,26 @@ function forecastHtml(r, bib) {
   return `<span class="fc possible">Possible pull · lap ${f.lap}${pct}</span>`;
 }
 
+// Riders come into view at the 80% zone about 12 seconds after they pass checkpoint 13.
+const VIEW_DELAY = 12000;
 function etaHtml(r, bib) {
   if (safeOf(r, bib)) return '';
+  const R = r.results, res = resOf(r, bib);
+  if (!R || !res) return '';
+  const raceNow = R.raceTime + (Date.now() - Date.parse(R.at));
+  // Just passed checkpoint 13 on this lap: they are about to come into view.
+  const passed = res.loc >= zoneLoc(r) ? zoneTime(r, bib, res.lap) : null;
+  if (passed != null && raceNow - passed < VIEW_DELAY + 5000) {
+    const left = passed + VIEW_DELAY - raceNow;
+    return `<span class="eta soon">In view at 80% zone ${left > 0 ? 'in ' + fmtDur(left + 999) : 'now'} · lap ${res.lap}</span>`;
+  }
   const e = zoneEta(r, bib);
   if (!e) return '';
-  const R = r.results, raceNow = R.raceTime + (Date.now() - Date.parse(R.at));
-  const wall = new Date(Date.parse(R.at) + (e.t - R.raceTime)).toISOString();
-  const left = e.t - raceNow;
+  const t = e.t + VIEW_DELAY;
+  const wall = new Date(Date.parse(R.at) + (t - R.raceTime)).toISOString();
+  const left = t - raceNow;
   const when = left >= 0 ? `in ${fmtDur(left)}` : `due ${fmtDur(-left)} ago`;
-  return `<span class="eta ${left < 0 ? 'late' : left < 60000 ? 'soon' : ''}">80% zone lap ${e.lap} ≈ ${fmtTime(wall, true)} · ${when}</span>`;
+  return `<span class="eta ${left < 0 ? 'late' : left < 60000 ? 'soon' : ''}">In view at 80% zone lap ${e.lap} ≈ ${fmtTime(wall, true)} · ${when}</span>`;
 }
 
 function lossHtml(r, bib) {
@@ -1328,7 +1339,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 18;
+const APP_VERSION = 19;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
