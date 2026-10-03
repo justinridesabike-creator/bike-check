@@ -41,6 +41,10 @@ header.bar h1 { font-size: 20px; margin: 0; flex: 1; min-width: 0; white-space: 
 main { padding: 16px; max-width: 1100px; margin: 0 auto; }
 .empty { text-align: center; color: var(--muted); padding: 60px 16px; }
 .empty p { max-width: 460px; margin: 8px auto; }
+.group-head { display: flex; align-items: baseline; gap: 10px; margin: 22px 0 10px; }
+.group-head:first-child { margin-top: 4px; }
+.group-head h2 { margin: 0; font-size: 22px; }
+.group-head span { color: var(--muted); font-size: 14px; }
 .races { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
 .race-card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; cursor: pointer; }
 .race-card .cat { font-size: 20px; font-weight: 700; }
@@ -136,7 +140,7 @@ table.sl tr.rider.dnf td.chk-td, table.sl tr.rider.out td.res { opacity: 1; }
     <p>Tap <b>Import start list</b> and pick one or more UCI start list PDFs from Files.</p>
     <p>Everything is stored on this iPad and works without a connection.</p>
   </div>
-  <div id="raceList" class="races"></div>
+  <div id="raceList"></div>
   <p class="footer-note" id="appVersion"></p>
 </main>
 
@@ -415,10 +419,21 @@ function splitText(c) {
   return [c.pre ? `${c.pre} pre` : '', c.post ? `${c.post} post` : '', c.dns ? `${c.dns} DNS` : '', c.dnf ? `${c.dnf} DNF` : ''].filter(Boolean).join(' · ');
 }
 function countText(c) { return `${c.done} / ${c.total}`; }
-function raceTitle(r) { return r.meta.category || r.fileName; }
+// Short discipline code from the start list header, e.g. "CROSS-COUNTRY SHORT TRACK" -> XCC.
+function discCode(r) {
+  const d = (r.meta.discipline || '').toUpperCase();
+  if (/SHORT TRACK/.test(d)) return 'XCC';
+  if (/ELIMINATOR/.test(d)) return 'XCE';
+  if (/MARATHON/.test(d)) return 'XCM';
+  if (/DOWNHILL/.test(d)) return 'DHI';
+  if (/CROSS-COUNTRY|OLYMPIC/.test(d)) return 'XCO';
+  return '';
+}
+function raceTitle(r) { return [discCode(r), r.meta.category || r.fileName].filter(Boolean).join(' '); }
 function raceSub(r) {
   return [r.meta.discipline, r.meta.date, r.meta.startTime && 'Start ' + r.meta.startTime].filter(Boolean).join(' · ');
 }
+function cardSub(r) { return r.meta.startTime ? 'Start ' + r.meta.startTime : ''; }
 function sortKey(r) {
   const d = Date.parse((r.meta.date || '').replace(/^\w+\s+/, '')) || 0;
   return d + ' ' + (r.meta.startTime || '').padStart(5, '0');
@@ -451,15 +466,26 @@ function renderHome() {
   $('#raceView').classList.add('hidden');
   const list = Object.values(races).sort((a, b) => sortKey(a) < sortKey(b) ? -1 : 1);
   $('#emptyState').classList.toggle('hidden', list.length > 0);
-  $('#raceList').innerHTML = list.map(r => {
+  const card = r => {
     const c = counts(r), complete = c.done === c.total, split = splitText(c);
     return `<div class="race-card ${complete ? 'complete' : ''}" data-id="${esc(r.id)}">
       <div class="cat">${esc(raceTitle(r))}</div>
-      <div class="meta">${esc(raceSub(r))}</div>
+      <div class="meta">${esc(cardSub(r))}</div>
       <div class="progress"><div style="width:${c.total ? c.done / c.total * 100 : 100}%"></div></div>
       <div class="count">${countText(c)} checked${complete ? ' ✓' : ''}${split ? ` <span class="split">· ${split}</span>` : ''}</div>
     </div>`;
-  }).join('');
+  };
+  // One section per discipline and day (e.g. XCC Friday, XCO Saturday), in schedule order.
+  const groups = [];
+  for (const r of list) {
+    const key = discCode(r) + '|' + (r.meta.date || '');
+    let g = groups.find(x => x.key === key);
+    if (!g) groups.push(g = { key, code: discCode(r) || 'Other', name: r.meta.discipline || '', date: r.meta.date || '', races: [] });
+    g.races.push(r);
+  }
+  $('#raceList').innerHTML = groups.map(g => `
+    <div class="group-head"><h2>${esc(g.code)}</h2><span>${esc([g.name, g.date].filter(Boolean).join(' · '))}</span></div>
+    <div class="races">${g.races.map(card).join('')}</div>`).join('');
 }
 
 function openRace(id) {
@@ -876,7 +902,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 12;
+const APP_VERSION = 13;
 $('#appVersion').textContent = `Bike Check version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
