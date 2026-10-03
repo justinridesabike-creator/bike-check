@@ -147,6 +147,22 @@ table.sl tr.loss td.bib { box-shadow: inset 6px 0 0 var(--loss); }
 .safe-tag { display: inline-block; margin-top: 3px; font-size: 12px; font-weight: 900; padding: 2px 7px; border-radius: 6px;
   background: var(--ok); color: #fff; }
 .live-note .safe-note { color: var(--ok); font-weight: 800; }
+table.sl tr.rider { cursor: pointer; }
+.report { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 60; display: flex; align-items: flex-end; justify-content: center; }
+.report .sheet { background: var(--card); color: var(--ink); width: 100%; max-width: 760px; max-height: 85vh; overflow: auto;
+  border-radius: 18px 18px 0 0; padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); }
+@media (min-width: 700px) { .report { align-items: center; } .report .sheet { border-radius: 18px; } }
+.sheet-head { display: flex; align-items: center; gap: 12px; }
+.sheet-head h2 { flex: 1; margin: 0; font-size: 22px; }
+.rep-sub { margin: 6px 0; color: var(--muted); font-size: 14px; }
+.rep-sub b { color: var(--ink); }
+table.rep { width: 100%; border-collapse: collapse; margin-top: 10px; font-variant-numeric: tabular-nums; }
+table.rep th { font-size: 12px; text-transform: uppercase; color: var(--muted); padding: 6px; border-bottom: 2px solid var(--line); }
+table.rep td { padding: 8px 6px; border-bottom: 1px solid var(--line); font-size: 16px; }
+table.rep tr.watch td { background: var(--watch-bg); color: var(--watch-ink); }
+table.rep tr.alert td { background: var(--alert-bg); color: var(--alert-ink); }
+.rep-src { font-size: 11px; color: var(--muted); }
+.rep-note { font-size: 12px; color: var(--muted); }
 .loss-tag { display: inline-block; margin-top: 3px; font-size: 12px; font-weight: 800; padding: 2px 7px; border-radius: 6px;
   background: var(--loss); color: #fff; }
 .live-note .orange { color: var(--loss); font-weight: 700; }
@@ -253,8 +269,16 @@ table.sl tr.zone-div b { margin-right: 18px; }
     previous Leader through tap, so look for them.
     Under each name: when the rider should come into view at the 80% zone (12 seconds after checkpoint 13), from their earlier laps and current pace, and a forecast:
     <b>PULL LIKELY</b> if their projected gap there is past the pull time, <b>Possible pull</b> if past 75% or heading there. <b>SAFE</b>: took the bell (crossed the line after the leader started the last lap) or the leader has finished; no more pulls for them.
-    <b>Pulled</b> only changes how a rider is shown.</p>
+    <b>Pulled</b> only changes how a rider is shown. Tap a rider for their report of every pass of the 80% zone.</p>
 </section>
+
+<!-- Rider report: every pass of the 80% zone -->
+<div id="report" class="report hidden" role="dialog" aria-modal="true">
+  <div class="sheet">
+    <div class="sheet-head"><h2 id="repTitle"></h2><button id="repClose" class="btn small">Close</button></div>
+    <div id="repBody"></div>
+  </div>
+</div>
 
 <div id="toast" class="toast hidden"><span id="toastMsg"></span><button id="toastUndo">Undo</button></div>
 
@@ -670,6 +694,7 @@ function refreshHomeStates() {
 setInterval(refreshHomeStates, 15000);
 function renderHome() {
   currentId = null;
+  closeReport();
   $('#title').textContent = '80% Zone';
   $('#backBtn').classList.add('hidden');
   $('#home').classList.remove('hidden');
@@ -700,6 +725,7 @@ function setFilter(f) {
   document.querySelectorAll('#filterSeg button').forEach(b => b.classList.toggle('on', b.dataset.f === f));
 }
 function openRace(id) {
+  closeReport();
   currentId = id;
   autoOpened.add(id);
   setFilter('all');
@@ -877,6 +903,50 @@ function forecastHtml(r, bib) {
   return `<span class="fc possible">Possible pull · lap ${f.lap}${pct}</span>`;
 }
 
+/* ---------- Rider report ---------- */
+// Tapping a rider opens every pass of the 80% zone (checkpoint 13): time there, when they came into view, gap to the
+// leader and share of lap 1. Laps where the app was not open to record checkpoint 13 show the gap at the line.
+let reportBib = null;
+function openReport(bib) { reportBib = bib; renderReport(); $('#report').classList.remove('hidden'); }
+function closeReport() { reportBib = null; $('#report').classList.add('hidden'); }
+function wallOf(r, raceT) { const R = r.results; return new Date(Date.parse(R.at) + (raceT - R.raceTime)).toISOString(); }
+function renderReport() {
+  const r = races[currentId], x = r && r.riders.find(x => x.bib === reportBib);
+  if (!x) return closeReport();
+  const res = resOf(r, x.bib), R = r.results, base = baseOf(r), Z = zoneLoc(r);
+  $('#repTitle').textContent = `#${x.bib} ${x.name}`;
+  const head = `<p class="rep-sub">${esc([x.team, x.nat].filter(Boolean).join(' · '))}</p>`;
+  if (!res || !R) { $('#repBody').innerHTML = head + '<p class="rep-sub">No live timing for this rider yet.</p>'; return; }
+  const status = isPulled(r, x.bib) ? 'Shown as pulled' : res.status !== 'OK' ? resultLabel(res) : res.inRace ? `Racing · lap ${res.lap} · checkpoint ${res.loc ? res.loc + '/' + (r.maxLoc || '?') : 'line'}` : 'Finished';
+  const lastLap = Math.max(res.done, pastZone(r, res, res.lap) ? res.lap : res.lap - 1);
+  const rows = [];
+  for (let lap = 1; lap <= lastLap; lap++) {
+    const at = zoneTime(r, x.bib, lap), lead = leaderZoneTime(r, lap);
+    const lapTime = res.lt && res.lt[lap - 1] != null ? res.lt[lap - 1] - (lap > 1 ? res.lt[lap - 2] : 0) : null;
+    let gap = null, src = '';
+    if (at != null && lead != null) { gap = at - lead; src = `ck ${Z}`; }
+    else if (res.lt && res.lt[lap - 1] != null && R.leaderAt && R.leaderAt[lap] != null) { gap = res.lt[lap - 1] - R.leaderAt[lap]; src = 'line*'; }
+    const lv = gap != null && base ? level(gap / base) : null;
+    rows.push(`<tr class="${lv === 'over' ? 'alert over' : lv || ''}">
+      <td class="num"><b>${lap}</b></td>
+      <td class="num">${at != null ? fmtTime(wallOf(r, at), true) : '—'}</td>
+      <td class="num">${at != null ? fmtTime(wallOf(r, at + VIEW_DELAY), true) : '—'}</td>
+      <td class="num">${gap == null ? '—' : gap ? '+' + fmtDur(gap) : 'Leader'}${src ? ` <span class="rep-src">${src}</span>` : ''}</td>
+      <td class="num">${gap != null && base ? Math.round(gap / base * 100) + '%' : '—'}</td>
+      <td class="num">${lapTime != null ? fmtDur(lapTime) : '—'}</td></tr>`);
+  }
+  const f = pullForecast(r, x.bib), safe = safeOf(r, x.bib);
+  const next = safe ? `<p class="rep-sub"><b>Safe:</b> ${esc(safe)}</p>`
+    : f ? `<p class="rep-sub">${forecastHtml(r, x.bib)}</p>` : '';
+  $('#repBody').innerHTML = `${head}<p class="rep-sub"><b>${esc(status)}</b>${base ? ` · pull at +${fmtDur(cutOf(r))} (80% of lap 1)` : ''}</p>${next}
+    <p class="rep-sub">${etaHtml(r, x.bib)}</p>
+    ${rows.length ? `<table class="rep">
+      <thead><tr><th class="num">Lap</th><th class="num">At ck ${Z}</th><th class="num">In view</th><th class="num">Gap</th><th class="num">% lap 1</th><th class="num">Lap time</th></tr></thead>
+      <tbody>${rows.join('')}</tbody></table>
+      ${rows.some(t => t.includes('line*')) ? `<p class="rep-note">* Checkpoint ${Z} not recorded on that lap (the app was not open); gap at the finish line instead.</p>` : ''}`
+      : '<p class="rep-sub">No pass of the 80% zone yet.</p>'}`;
+}
+
 // Riders come into view at the 80% zone about 12 seconds after they pass checkpoint 13.
 const VIEW_DELAY = 12000;
 function etaHtml(r, bib) {
@@ -933,6 +1003,7 @@ function liveGapHtml(r, bib) {
 function updateRows() {
   const r = races[currentId];
   if (!r) return;
+  if (reportBib) renderReport();
   const note = liveNoteHtml(r);
   if ($('#liveNote').innerHTML !== note) $('#liveNote').innerHTML = note;
   for (const tr of document.querySelectorAll('#rows tr.rider')) {
@@ -1296,7 +1367,14 @@ $('#fileInput').onchange = async e => {
 $('#backBtn').onclick = renderHome;
 $('#raceList').onclick = e => { const c = e.target.closest('.race-card'); if (c) openRace(c.dataset.id); };
 $('#passBtn').onclick = leaderThrough;
-$('#rows').onclick = e => { const b = e.target.closest('[data-pull]'); if (b) togglePulled(b.dataset.pull); };
+$('#rows').onclick = e => {
+  const b = e.target.closest('[data-pull]');
+  if (b) return togglePulled(b.dataset.pull);
+  const tr = e.target.closest('tr.rider');
+  if (tr) openReport(tr.dataset.bib);
+};
+$('#repClose').onclick = closeReport;
+$('#report').onclick = e => { if (e.target.id === 'report') closeReport(); };
 $('#cutLine').onclick = e => { if (e.target.closest('#cutBtn')) changeCut(); };
 $('#search').oninput = renderRace;
 $('#filterSeg').onclick = e => {
@@ -1339,7 +1417,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 19;
+const APP_VERSION = 20;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
