@@ -616,8 +616,28 @@ function safeOf(r, bib) {
   return null;
 }
 function lappedOf(r, bib) {
-  const t = r.timer, res = resOf(r, bib);
-  return !!(t && t.lap && t.passes > 1 && racing(r, bib) && !safeOf(r, bib) && !pastZone(r, res, t.lap - 1));
+  const t = r.timer;
+  return !!(t && t.lap && t.passes > 1 && racing(r, bib) && !safeOf(r, bib) && !throughZone(r, bib, t.lap - 1));
+}
+// Riders are pulled anywhere between checkpoint 13 and checkpoint 14. A rider over the 80% limit at checkpoint 13
+// is in the pull zone, not through, until timing shows them at checkpoint 14 (or beyond): only then are they going
+// out for another lap.
+function overAtZone(r, bib, lap) {
+  const cut = cutOf(r), res = resOf(r, bib);
+  if (!cut || !res) return false;
+  const g = zoneGap(r, bib, lap);
+  return (g != null ? g : res.gap || 0) >= cut;
+}
+function inPullZone(r, bib) {
+  if (!racing(r, bib) || safeOf(r, bib)) return false;
+  const res = resOf(r, bib), Z = zoneLoc(r);
+  return res.loc >= Z && res.loc < Z + 1 && overAtZone(r, bib, res.lap);
+}
+// Through the zone on a lap: past checkpoint 13, and if over the limit there, also past checkpoint 14.
+function throughZone(r, bib, lap) {
+  const res = resOf(r, bib);
+  if (!res || !pastZone(r, res, lap)) return false;
+  return !(res.lap === lap && inPullZone(r, bib));
 }
 function riskOf(r, bib) {
   if (safeOf(r, bib)) return null;
@@ -790,12 +810,16 @@ function renderRace() {
   const L = zoneLap(r);
   if (L) {
     const Z = zoneLoc(r), on = rows.filter(x => racing(r, x.bib));
-    const past = on.filter(x => pastZone(r, resOf(r, x.bib), L));
+    const past = on.filter(x => throughZone(r, x.bib, L));
     if (on.length) {
+      // Riders through go above the divider and everyone else below, each in race order. A rider in the pull zone
+      // (over the limit between checkpoints 13 and 14) is ahead on the road, so shows first under the divider.
       // Nobody through yet (e.g. just after the leader's pass): the divider sits at the top.
-      const at = past.length ? rows.indexOf(past[past.length - 1]) + 1 : 0;
-      html.splice(at, 0, `<tr class="zone-div"><td colspan="13"><span>80% zone · ck ${Z} · lap ${L}</span>
-        <b>▲ ${past.length} through</b><b>▼ ${on.length - past.length} still to come</b></td></tr>`);
+      const isPast = new Set(past), top = [], rest = [];
+      rows.forEach((x, i) => (isPast.has(x) ? top : rest).push(html[i]));
+      html.length = 0;
+      html.push(...top, `<tr class="zone-div"><td colspan="13"><span>80% zone · ck ${Z} · lap ${L}</span>
+        <b>▲ ${past.length} through</b><b>▼ ${on.length - past.length} still to come</b></td></tr>`, ...rest);
     }
   }
   $('#rows').innerHTML = html.join('') || `<tr><td colspan="13" class="ctr" style="padding:30px;color:var(--muted)">${empty}</td></tr>`;
@@ -827,6 +851,7 @@ function zoneShare(r) {
   return median(shares);
 }
 function zoneEta(r, bib) {
+  if (inPullZone(r, bib)) return null; // being pulled between checkpoints 13 and 14: no next lap yet
   if (!racing(r, bib) || !r.results || r.results.status !== 'InProgress') return null;
   const res = resOf(r, bib), R = r.results, Z = zoneLoc(r), h = (r.splits && r.splits[bib]) || {};
   if (!res.lt) return null;
@@ -876,6 +901,10 @@ function lossPerLap(r, bib) {
 //              later lap (before the race ends).
 function pullForecast(r, bib) {
   if (safeOf(r, bib)) return null;
+  if (inPullZone(r, bib)) {
+    const res = resOf(r, bib), g = zoneGap(r, bib, res.lap);
+    return { kind: 'likely', now: true, lap: res.lap, at: zoneTime(r, bib, res.lap) ?? 0, gap: g != null ? g : res.gap };
+  }
   const e = zoneEta(r, bib), cut = cutOf(r);
   if (!e || !cut) return null;
   const R = r.results, base = baseOf(r);
@@ -898,6 +927,7 @@ function forecastHtml(r, bib) {
   const f = pullForecast(r, bib);
   if (!f) return '';
   const pct = f.gap != null ? ` · proj +${fmtDur(f.gap)} (${Math.round(f.gap / baseOf(r) * 100)}%)` : '';
+  if (f.now) return `<span class="fc likely">IN PULL ZONE · over 80% at ck ${zoneLoc(r)} · +${fmtDur(f.gap)} (${Math.round(f.gap / baseOf(r) * 100)}%)</span>`;
   if (f.kind === 'likely') return `<span class="fc likely">PULL LIKELY · lap ${f.lap}${f.lapped ? ' · leader there first' : pct}</span>`;
   if (f.trend) return `<span class="fc possible">Possible pull · lap ${f.lap} at this rate (losing ${fmtDur(f.trend)}/lap)</span>`;
   return `<span class="fc possible">Possible pull · lap ${f.lap}${pct}</span>`;
@@ -1417,7 +1447,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 22;
+const APP_VERSION = 23;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
