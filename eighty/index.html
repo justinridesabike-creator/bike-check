@@ -54,6 +54,14 @@ main { padding: 16px; max-width: 1100px; margin: 0 auto; }
 .races { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
 .race-card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; cursor: pointer; }
 .race-card .cat { font-size: 20px; font-weight: 700; }
+.state { display: inline-block; vertical-align: 3px; margin-left: 6px; font-size: 12px; font-weight: 800; padding: 2px 8px; border-radius: 99px; }
+.state.todo { background: var(--chip); color: var(--muted); }
+.state.live { background: var(--ok); color: #fff; }
+.state.live::before { content: '● '; animation: blink 1.4s infinite; }
+@keyframes blink { 50% { opacity: .3; } }
+.state.done { background: var(--ink); color: var(--card); }
+.race-card.st-live { border-color: var(--ok); border-width: 2px; }
+.race-card.st-done { opacity: .7; }
 .race-card .meta { color: var(--muted); font-size: 14px; margin-top: 2px; }
 
 /* Race view */
@@ -636,6 +644,30 @@ function lossOf(r, bib) {
 }
 
 /* ---------- Home ---------- */
+// Race status for the home screen, from live timing when the app has it, otherwise from the start time.
+function raceState(r) {
+  const R = r.results, st = startDate(r), now = Date.now();
+  if (R && R.status === 'Finished') return { key: 'done', label: 'Finished' };
+  if (R && R.status === 'InProgress' && R.started) return { key: 'live', label: `In progress${R.maxLaps ? ` · lap ${R.curLap}/${R.maxLaps}` : ''}` };
+  if (st && now < st.getTime()) return { key: 'todo', label: 'Not started' };
+  if (st && now - st.getTime() > 4 * 3600000) return { key: 'done', label: 'Finished' };
+  return { key: 'live', label: 'Started · waiting for timing' };
+}
+// While the home screen is open, check live timing about once a minute for races that have started (or start within
+// 15 minutes) and are not finished yet.
+const homeChecked = {};
+function refreshHomeStates() {
+  if (currentId || document.visibilityState !== 'visible') return;
+  for (const r of Object.values(races)) {
+    const st = startDate(r);
+    if (!st || Date.now() < st.getTime() - 15 * 60000) continue;
+    if (r.results && r.results.status === 'Finished') continue;
+    if (homeChecked[r.id] && Date.now() - homeChecked[r.id] < 60000) continue;
+    homeChecked[r.id] = Date.now();
+    refreshLive(r.id).then(() => { if (!currentId) renderHome(); });
+  }
+}
+setInterval(refreshHomeStates, 15000);
 function renderHome() {
   currentId = null;
   $('#title').textContent = '80% Zone';
@@ -644,8 +676,8 @@ function renderHome() {
   $('#raceView').classList.add('hidden');
   const list = Object.values(races).sort((a, b) => sortKey(a) < sortKey(b) ? -1 : 1);
   $('#emptyState').classList.toggle('hidden', list.length > 0);
-  const card = r => `<div class="race-card" data-id="${esc(r.id)}">
-      <div class="cat">${esc(raceTitle(r))}</div>
+  const card = r => `<div class="race-card st-${raceState(r).key}" data-id="${esc(r.id)}">
+      <div class="cat">${esc(raceTitle(r))} <span class="state ${raceState(r).key}">${esc(raceState(r).label)}</span></div>
       <div class="meta">${esc(r.meta.startTime ? 'Start ' + r.meta.startTime + ' · ' : '')}${r.riders.length} riders${r.cutOverride ? ' · pull time +' + fmtDur(r.cutOverride) + ' set by hand' : ''}</div>
     </div>`;
   // One section per discipline and day (e.g. XCC Friday, XCO Saturday), in schedule order.
@@ -656,6 +688,7 @@ function renderHome() {
     if (!g) groups.push(g = { key, code: discCode(r) || 'Other', name: r.meta.discipline || '', date: r.meta.date || '', races: [] });
     g.races.push(r);
   }
+  setTimeout(refreshHomeStates, 0);
   $('#raceList').innerHTML = groups.map(g => `
     <div class="group-head"><h2>${esc(g.code)}</h2><span>${esc([g.name, g.date].filter(Boolean).join(' · '))}</span></div>
     <div class="races">${g.races.map(card).join('')}</div>`).join('');
@@ -1265,7 +1298,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 12;
+const APP_VERSION = 13;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
