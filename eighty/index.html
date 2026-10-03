@@ -113,6 +113,10 @@ td.res .sbar { display: block; width: 40px; height: 4px; margin: 2px auto 0; bor
 td.res .sbar i { display: block; height: 100%; background: var(--ok); }
 td.gap { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 18px; font-weight: 700; }
 td.gap .pct { display: block; font-size: 11px; font-weight: 700; color: var(--muted); }
+td.live-gap { font-size: 16px; font-weight: 600; }
+td.gap .trend { display: block; font-size: 11px; font-weight: 800; color: var(--muted); }
+td.gap .trend.lose { color: var(--over); }
+td.gap .trend.gain { color: var(--ok); }
 td.gap .pull { display: inline-block; font-size: 11px; font-weight: 900; padding: 1px 6px; border-radius: 5px; background: var(--over); color: #fff; margin-right: 4px; vertical-align: 2px; }
 
 /* Highlights by share of the pull time */
@@ -210,10 +214,11 @@ table.sl tr.out td:not(.res) { opacity: .4; }
         <th class="hide-md">UCI ID</th>
         <th>NAT</th>
         <th class="num hide-md">YOB</th>
-        <th class="num hide-sm">WCS</th>
-        <th class="num hide-sm">UCI</th>
+        <th class="num hide-md">WCS</th>
+        <th class="num hide-md">UCI</th>
         <th class="ctr">Pos</th>
-        <th class="num">Behind</th>
+        <th class="num">At ck 13</th>
+        <th class="num">Live gap</th>
         <th class="ctr">Pulled</th>
       </tr>
     </thead>
@@ -221,7 +226,7 @@ table.sl tr.out td:not(.res) { opacity: .4; }
   </table>
   <p class="footer-note">Riders are sorted by live position from every timing point around the course. Tap <b>Leader through</b> each
     time the leader passes the 80% zone (about timing checkpoint 13): riders who haven't reached checkpoint 13 yet are as far behind
-    as the timer; riders past it show their gap to the leader at checkpoint 13. Yellow: past 50% of the pull time.
+    as the timer; riders past it show their gap at checkpoint 13. <b>Live gap</b> follows timing round the course, with ▲ time lost or ▼ gained since checkpoint 13. Yellow: past 50% of the pull time.
     Red: past 75%. PULL: past the pull time. Orange: losing more time than on their previous lap (crash or mechanical?). Pulsing blue: lapped, not at checkpoint 13 since your
     previous Leader through tap, so look for them.
     <b>Pulled</b> only changes how a rider is shown.</p>
@@ -487,27 +492,45 @@ function zoneTime(r, bib, lap) {
   const start = lap > 1 ? res.lt && res.lt[lap - 2] : 0;
   return start == null ? null : start + inLap;
 }
-// The leader's time at the zone checkpoint on a lap: the earliest time anyone passed it on that lap.
+// The leader's time at the zone checkpoint on a lap: the time of the rider who led that lap (first across the line
+// at its end, or the current leader if nobody has finished it yet). Only that rider's own record counts, so a lap
+// whose leader passed before the app was watching gives no checkpoint 13 gaps rather than wrong ones.
 function leaderZoneTime(r, lap) {
-  let best = null;
-  for (const x of r.riders) { const t = zoneTime(r, x.bib, lap); if (t != null && (best == null || t < best)) best = t; }
-  return best;
+  const R = r.results;
+  if (!R) return null;
+  let lead = null;
+  if (R.leaderAt && R.leaderAt[lap] != null) lead = Object.keys(R.byBib).find(b => (R.byBib[b].lt || [])[lap - 1] === R.leaderAt[lap]);
+  else lead = Object.keys(R.byBib).find(b => R.byBib[b].pos === 1 && R.byBib[b].inRace);
+  return lead ? zoneTime(r, lead, lap) : null;
+}
+// The rider's gap to the leader at the zone checkpoint on a lap, if both passes were captured.
+function zoneGap(r, bib, lap) {
+  const at = zoneTime(r, bib, lap), lead = leaderZoneTime(r, lap);
+  return at != null && lead != null ? at - lead : null;
+}
+// The most recent lap on which the rider's checkpoint 13 gap is known.
+function lastZoneGap(r, bib) {
+  const res = resOf(r, bib);
+  for (let lap = res.lap; lap >= 1; lap--) { const g = zoneGap(r, bib, lap); if (g != null) return { ms: g, lap }; }
+  return null;
 }
 
-// Time behind the leader at the 80% zone. The official's timer starts when the leader passes the zone:
-// - riders who have reached checkpoint 13 on that lap are through: their gap is their time at checkpoint 13 minus
-//   the leader's (or, if that split was missed, their gap at the line);
-// - riders not through yet are at least as far behind as the timer shows, so the timer counts for them.
-// Without a timer (before the leader's first pass) the live timing gap is used.
+// Time behind the leader at the 80% zone (checkpoint 13). This is the figure the colours use.
+// - Once the timer runs (the leader has passed the zone), riders who have reached checkpoint 13 on that lap keep
+//   their checkpoint 13 gap, also after the line, until the next leader pass. Riders not there yet are at least as
+//   far behind as the timer shows, so the timer counts for them.
+// - Before the first leader pass: the last checkpoint 13 gap known, else the live timing gap.
+// If a checkpoint 13 time was missed, the live timing gap stands in.
 function behindOf(r, bib) {
   if (!racing(r, bib)) return null;
-  const res = resOf(r, bib), t = r.timer, R = r.results;
-  if (!t) return res.gap == null ? null : { ms: res.gap, from: 'timing' };
-  if (t.lap && pastZone(r, res, t.lap)) {
-    const at = zoneTime(r, bib, t.lap), lead = leaderZoneTime(r, t.lap);
-    if (at != null && lead != null) return { ms: at - lead, from: 'zone' };
-    const lt = res.lt && res.lt[t.lap - 1], ll = R.leaderAt && R.leaderAt[t.lap];
-    return lt != null && ll != null ? { ms: lt - ll, from: 'through' } : { ms: res.gap, from: 'timing' };
+  const res = resOf(r, bib), t = r.timer;
+  if (!t || !t.lap) {
+    const z = lastZoneGap(r, bib);
+    if (z) return { ms: z.ms, from: 'zone', lap: z.lap };
+    if (!t) return res.gap == null ? null : { ms: res.gap, from: 'timing' };
+  } else if (pastZone(r, res, t.lap)) {
+    const g = zoneGap(r, bib, t.lap);
+    return g != null ? { ms: g, from: 'zone', lap: t.lap } : { ms: res.gap, from: 'timing' };
   }
   const el = Date.now() - Date.parse(t.at);
   return el >= (res.gap || 0) ? { ms: el, from: 'timer' } : { ms: res.gap, from: 'timing' };
@@ -645,12 +668,13 @@ function renderRace() {
       <td class="uciid hide-md">${esc(x.uciId)}</td>
       <td>${esc(x.nat)}</td>
       <td class="num hide-md">${esc(x.yob)}</td>
-      <td class="num hide-sm">${esc(x.wcs)}</td>
-      <td class="num hide-sm">${esc(x.uci)}</td>
+      <td class="num hide-md">${esc(x.wcs)}</td>
+      <td class="num hide-md">${esc(x.uci)}</td>
       ${resultCell(r, x.bib)}
       <td class="gap">${gapHtml(r, x.bib)}</td>
+      <td class="gap live-gap">${liveGapHtml(r, x.bib)}</td>
       <td class="ctr">${outOfRace(r, x.bib) ? '' : `<button class="pull-btn" data-pull="${esc(x.bib)}">Pulled</button>`}</td>
-    </tr>`).join('') || `<tr><td colspan="12" class="ctr" style="padding:30px;color:var(--muted)">${empty}</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="13" class="ctr" style="padding:30px;color:var(--muted)">${empty}</td></tr>`;
 }
 
 // Timing already shows these riders as -80%, DNF or DNS.
@@ -665,13 +689,29 @@ function lossHtml(r, bib) {
   return (lappedOf(r, bib) ? '<span class="lap-tag">LAPPED · look for</span> ' : '')
     + (l ? `<span class="loss-tag">⚠ ${esc(l.why)}</span>` : '');
 }
+// "At ck 13" column: the 80% figure.
 function gapHtml(r, bib) {
   const b = behindOf(r, bib), cut = cutOf(r);
   if (!b) return '';
-  if (!b.ms) return 'Leader';
-  const note = { timer: 'not through · timer', zone: `at zone · ck ${zoneLoc(r)}`, through: 'through · line gap', timing: 'timing gap' }[b.from];
+  if (!b.ms && b.from !== 'timer') return 'Leader';
+  const note = { timer: 'not at 13 · timer', zone: `at ck ${zoneLoc(r)}${b.lap ? ' · lap ' + b.lap : ''}`, timing: 'timing gap' }[b.from];
   const pct = cut ? `${Math.round(b.ms / cut * 100)}% · ` : '';
   return `${riskOf(r, bib) === 'over' ? '<span class="pull">PULL</span>' : ''}+${fmtDur(b.ms)}<span class="pct">${pct}${note}</span>`;
+}
+// "Live gap" column: the gap at the rider's latest timing point around the course, and how much they have gained (▼)
+// or lost (▲) since their checkpoint 13 gap.
+function liveGapHtml(r, bib) {
+  if (!racing(r, bib)) return '';
+  const res = resOf(r, bib), b = behindOf(r, bib);
+  if (res.gap == null) return '';
+  if (!res.gap) return 'Leader';
+  let trend = '';
+  if (b && b.from === 'zone') {
+    const d = res.gap - b.ms;
+    trend = Math.abs(d) < 1000 ? '<span class="trend">= since 13</span>'
+      : `<span class="trend ${d > 0 ? 'lose' : 'gain'}">${d > 0 ? '▲ +' : '▼ −'}${fmtDur(Math.abs(d))} since 13</span>`;
+  }
+  return `+${fmtDur(res.gap)}${trend}`;
 }
 // The timer moves every second, so colours and gaps are refreshed in place without rebuilding (or reordering) rows.
 function updateRows() {
@@ -680,10 +720,11 @@ function updateRows() {
   const note = liveNoteHtml(r);
   if ($('#liveNote').innerHTML !== note) $('#liveNote').innerHTML = note;
   for (const tr of document.querySelectorAll('#rows tr.rider')) {
-    const bib = tr.dataset.bib, cls = rowClass(r, bib), gap = gapHtml(r, bib), loss = lossHtml(r, bib);
+    const bib = tr.dataset.bib, cls = rowClass(r, bib), gap = gapHtml(r, bib), live = liveGapHtml(r, bib), loss = lossHtml(r, bib);
     if (tr.className !== cls) tr.className = cls;
-    const g = tr.querySelector('td.gap'), l = tr.querySelector('.ltag');
+    const g = tr.querySelector('td.gap'), lg = tr.querySelector('td.live-gap'), l = tr.querySelector('.ltag');
     if (g.innerHTML !== gap) g.innerHTML = gap;
+    if (lg.innerHTML !== live) lg.innerHTML = live;
     if (l.innerHTML !== loss) l.innerHTML = loss;
   }
 }
@@ -1039,7 +1080,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 6;
+const APP_VERSION = 7;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
