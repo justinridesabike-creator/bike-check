@@ -186,6 +186,9 @@ table.sl tr.zone-div td { padding: 6px 12px; background: var(--ink); color: var(
   border-top: 3px solid var(--accent); border-bottom: 3px solid var(--accent); }
 table.sl tr.zone-div span { margin-right: 18px; letter-spacing: .04em; text-transform: uppercase; }
 table.sl tr.zone-div b { margin-right: 18px; }
+table.sl tr.zone-div.sec-past td { border-color: var(--ok); }
+table.sl tr.zone-div.sec-done td { background: var(--muted); border-color: var(--muted); }
+table.sl tr.zone-div.sec-out td { background: var(--chip); color: var(--muted); border-color: var(--line); }
 
 @media (max-width: 900px) {
   .hide-md { display: none; }
@@ -823,7 +826,30 @@ function renderRace() {
   // Divider at the 80% zone: riders above it have passed checkpoint 13 on the current zone lap, riders below are
   // still coming. It is placed after the last rider through, and moves with every live update.
   const L = zoneLap(r);
-  if (L) {
+  if (leaderFinished(r) && r.results) {
+    // Finish: sections for riders past the 80% zone on their last lap (heading for the line), riders still to reach
+    // it, riders who have finished, and riders out of the race (pulled, -80%, DNF, DNS...). Race order within each.
+    const Z = zoneLoc(r);
+    const group = x => {
+      const res = resOf(r, x.bib);
+      if (!res || isPulled(r, x.bib) || res.status !== 'OK') return 'out';
+      if (!res.inRace) return 'done';
+      return res.loc >= Z ? 'past' : 'todo';
+    };
+    const sections = [
+      ['past', `On course · past the 80% zone (ck ${Z}) · not finished`],
+      ['todo', 'On course · still to reach the 80% zone'],
+      ['done', 'Finished'],
+      ['out', 'Out of race · pulled / -80% · DNF · DNS'],
+    ];
+    const by = { past: [], todo: [], done: [], out: [] };
+    rows.forEach((x, i) => by[group(x)].push(html[i]));
+    html.length = 0;
+    for (const [k, label] of sections) {
+      if (!by[k].length) continue;
+      html.push(`<tr class="zone-div sec-${k}"><td colspan="13"><span>${esc(label)}</span><b>${by[k].length}</b></td></tr>`, ...by[k]);
+    }
+  } else if (L) {
     const Z = zoneLoc(r), on = rows.filter(x => racing(r, x.bib));
     const past = on.filter(x => throughZone(r, x.bib, L));
     if (on.length) {
@@ -1582,7 +1608,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 32;
+const APP_VERSION = 33;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
