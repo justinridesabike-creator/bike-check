@@ -383,6 +383,7 @@ async function importFile(file) {
 const $ = s => document.querySelector(s);
 const PHASES = { pre: 'Pre-race', post: 'Post-race' };
 let currentId = null;
+const autoOpened = new Set();
 let filter = 'all';
 let shownPhase = null;
 
@@ -463,6 +464,7 @@ function renderHome() {
 
 function openRace(id) {
   currentId = id;
+  autoOpened.add(id);
   filter = 'all';
   $('#search').value = '';
   document.querySelectorAll('#filterSeg button').forEach(b => b.classList.toggle('on', b.dataset.f === 'all'));
@@ -533,13 +535,16 @@ function renderRace() {
 }
 
 let undoState = null, toastTimer = null;
-function toast(msg, undo) {
+let toastAction = null;
+function toast(msg, undo, action) {
   undoState = undo;
+  toastAction = action || null;
   $('#toastMsg').textContent = msg;
-  $('#toastUndo').classList.toggle('hidden', !undo);
+  $('#toastUndo').textContent = action ? action.label : 'Undo';
+  $('#toastUndo').classList.toggle('hidden', !undo && !action);
   $('#toast').classList.remove('hidden');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => $('#toast').classList.add('hidden'), 4000);
+  toastTimer = setTimeout(() => $('#toast').classList.add('hidden'), action ? 10000 : 4000);
 }
 
 let lastTap = { key: null, t: 0 };
@@ -850,6 +855,7 @@ $('#deleteBtn').onclick = () => {
   delete races[currentId]; saveRaces(); renderHome();
 };
 $('#toastUndo').onclick = () => {
+  if (toastAction) { const a = toastAction; toastAction = null; $('#toast').classList.add('hidden'); return a.fn(); }
   if (!undoState) return;
   const r = races[undoState.id], u = undoState;
   if (u.before) r[u.field][u.bib] = u.before; else delete r[u.field][u.bib];
@@ -859,7 +865,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 10;
+const APP_VERSION = 11;
 $('#appVersion').textContent = `Bike Check version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
@@ -877,7 +883,37 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 // Ask the browser not to evict our saved data.
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 
-renderHome();
+/* ---------- Auto-open the current race ---------- */
+// The "current" race is the one whose start is less than 20 minutes away, or the most recent one that has started
+// (within 3 hours). On launch the app opens it directly; while running it switches once per race at T-20 minutes.
+const AUTO_OPEN_BEFORE = 20 * 60000, STALE_AFTER = 3 * 3600000;
+let lastInteraction = 0;
+['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, () => { lastInteraction = Date.now(); }, true));
+function currentRaceId(now = Date.now()) {
+  let best = null, bestStart = -Infinity;
+  for (const r of Object.values(races)) {
+    const st = startDate(r);
+    if (!st) continue;
+    const t = st.getTime();
+    if (now >= t - AUTO_OPEN_BEFORE && now < t + STALE_AFTER && t > bestStart) { best = r.id; bestStart = t; }
+  }
+  return best;
+}
+function autoOpenTick() {
+  const id = currentRaceId();
+  if (!id || id === currentId || autoOpened.has(id)) return;
+  // Don't switch under the user's finger or mid-search.
+  if (Date.now() - lastInteraction < 30000 || document.activeElement === $('#search')) return;
+  const prev = currentId;
+  openRace(id);
+  const r = races[id];
+  toast(`Opened ${raceTitle(r)} (start ${fmtTime(startDate(r))})`, null,
+    prev && races[prev] ? { label: `Back to ${raceTitle(races[prev])}`, fn: () => openRace(prev) } : null);
+}
+setInterval(autoOpenTick, 15000);
+
+const startId = currentRaceId();
+if (startId) openRace(startId); else renderHome();
 </script>
 </body>
 </html>

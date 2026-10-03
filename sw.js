@@ -1,5 +1,5 @@
 // Offline cache: bump VERSION (and APP_VERSION in index.html) whenever app files change.
-const VERSION = 'bikecheck-v10';
+const VERSION = 'bikecheck-v11';
 const FILES = ['./', 'index.html', 'manifest.json', 'icon-180.png', 'icon-512.png',
   'vendor/pdf.min.js', 'vendor/pdf.worker.min.js'];
 
