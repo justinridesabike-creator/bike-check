@@ -15,12 +15,14 @@
   --bg: #f4f5f7; --card: #ffffff; --ink: #16181d; --muted: #6b7280; --line: #e3e5ea;
   --accent: #6d28d9; --danger: #b91c1c; --chip: #eef1f6; --ok: #15803d; --dnf: #c2410c;
   --watch-bg: #fde68a; --watch-ink: #713f12; --alert-bg: #fecaca; --alert-ink: #7f1d1d; --over: #dc2626;
+  --loss: #ea580c; --loss-bg: #fdba74; --loss-ink: #7c2d12;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0f1115; --card: #181b21; --ink: #eceef2; --muted: #9aa1ad; --line: #2a2e36;
     --accent: #a78bfa; --danger: #f87171; --chip: #232731; --ok: #4ade80; --dnf: #fb923c;
     --watch-bg: #4a3b0a; --watch-ink: #fde68a; --alert-bg: #4c1414; --alert-ink: #fecaca; --over: #ef4444;
+    --loss: #fb923c; --loss-bg: #5a2a0c; --loss-ink: #fed7aa;
   }
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
@@ -114,6 +116,19 @@ table.sl tr.alert td { background: var(--alert-bg); color: var(--alert-ink); }
 table.sl tr.watch .team, table.sl tr.watch .pct, table.sl tr.watch .uciid { color: var(--watch-ink); }
 table.sl tr.alert .team, table.sl tr.alert .pct, table.sl tr.alert .uciid { color: var(--alert-ink); }
 table.sl tr.over td.bib { box-shadow: inset 6px 0 0 var(--over); }
+/* Orange wins over yellow; a red row keeps red but gets an orange edge and tag. */
+table.sl tr.loss:not(.alert) td { background: var(--loss-bg); color: var(--loss-ink); }
+table.sl tr.loss:not(.alert) .team, table.sl tr.loss:not(.alert) .pct, table.sl tr.loss:not(.alert) .uciid { color: var(--loss-ink); }
+table.sl tr.loss td.bib { box-shadow: inset 6px 0 0 var(--loss); }
+.loss-tag { display: inline-block; margin-top: 3px; font-size: 12px; font-weight: 800; padding: 2px 7px; border-radius: 6px;
+  background: var(--loss); color: #fff; }
+.live-note .orange { color: var(--loss); font-weight: 700; }
+.pull-btn { border: 1px solid var(--line); background: var(--card); border-radius: 10px; min-height: 44px; padding: 8px 10px;
+  font-size: 14px; font-weight: 700; color: var(--muted); cursor: pointer; }
+table.sl tr.pulled td { background: var(--chip); }
+table.sl tr.pulled td:not(:last-child) { opacity: .4; }
+table.sl tr.pulled .nm { text-decoration: line-through; }
+tr.pulled .pull-btn { background: var(--accent); border-color: var(--accent); color: #fff; }
 table.sl tr.out td:not(.res) { opacity: .4; }
 
 @media (max-width: 900px) {
@@ -162,7 +177,7 @@ table.sl tr.out td:not(.res) { opacity: .4; }
       <input id="search" type="search" placeholder="Bib, name, team or nation" autocomplete="off" inputmode="search">
       <div class="seg" id="filterSeg">
         <button data-f="all" class="on">All</button>
-        <button data-f="watch">Yellow &amp; red</button>
+        <button data-f="watch">Watch list</button>
       </div>
       <button id="moreBtn" class="btn small">More…</button>
     </div>
@@ -184,13 +199,16 @@ table.sl tr.out td:not(.res) { opacity: .4; }
         <th class="num hide-sm">WCS</th>
         <th class="num hide-sm">UCI</th>
         <th class="ctr">Pos</th>
-        <th class="num">Gap</th>
+        <th class="num">Behind</th>
+        <th class="ctr">Pulled</th>
       </tr>
     </thead>
     <tbody id="rows"></tbody>
   </table>
-  <p class="footer-note">Riders are sorted by live position from every timing point around the course. Yellow: gap past 50% of the
-    pull time. Red: past 75%. PULL: past the pull time. Tap <b>Leader through</b> each time the leader passes the 80% zone.</p>
+  <p class="footer-note">Riders are sorted by live position from every timing point around the course. Tap <b>Leader through</b> each
+    time the leader passes the 80% zone: riders not through yet are as far behind as the timer. Yellow: past 50% of the pull time.
+    Red: past 75%. PULL: past the pull time. Orange: losing more time than on their previous lap (crash or mechanical?).
+    <b>Pulled</b> only changes how a rider is shown.</p>
 </section>
 
 <div id="toast" class="toast hidden"><span id="toastMsg"></span><button id="toastUndo">Undo</button></div>
@@ -361,8 +379,9 @@ async function importFile(file) {
   if (!riders.length) throw new Error('No riders found in ' + file.name + '. Is this a UCI start list PDF?');
   const id = [meta.date, meta.discipline, meta.category, meta.startTime].filter(Boolean).join(' | ') || file.name;
   const existing = races[id];
-  // Re-importing a revised start list keeps the race's pull time, timer and live link.
-  const keep = existing ? { cutOverride: existing.cutOverride, timer: existing.timer, live: existing.live, results: existing.results } : {};
+  // Re-importing a revised start list keeps the race's pull time, timer, pulled riders and live link.
+  const keep = existing ? { cutOverride: existing.cutOverride, timer: existing.timer, pulled: existing.pulled, splits: existing.splits,
+    live: existing.live, results: existing.results } : {};
   races[id] = {
     id, meta, riders, ...keep,
     fileName: file.name,
@@ -425,7 +444,7 @@ function parseDur(s) {
 
 /* ---------- Pull time and highlights ---------- */
 // Theoretical pull time: 80% of the leader's first lap. It can be set by hand (often needed in short track).
-// Riders are highlighted by their gap to the leader as a share of the pull time.
+// Riders are highlighted by their time behind the leader as a share of the pull time.
 const WATCH = 0.5, ALERT = 0.75;
 function autoCut(r) {
   const l1 = r.results && r.results.leaderLap1;
@@ -433,10 +452,69 @@ function autoCut(r) {
 }
 function cutOf(r) { return r.cutOverride || autoCut(r); }
 function level(share) { return share == null ? null : share >= 1 ? 'over' : share >= ALERT ? 'alert' : share >= WATCH ? 'watch' : null; }
+function isPulled(r, bib) { return !!(r.pulled && r.pulled[bib]); }
+function racing(r, bib) {
+  const res = resOf(r, bib);
+  return !!res && res.inRace && res.status === 'OK' && !isPulled(r, bib);
+}
+
+// Time behind the leader at the 80% zone. The zone has no timing point, so it runs off the official's timer:
+// - riders who have crossed the line since the leader's pass (the zone is just before it) keep the gap they had
+//   at the line on that lap;
+// - riders not through yet are at least as far behind as the timer shows, so the timer counts for them.
+// Without a timer (before the leader's first pass) the live timing gap is used.
+function behindOf(r, bib) {
+  if (!racing(r, bib)) return null;
+  const res = resOf(r, bib), t = r.timer, R = r.results;
+  if (!t) return res.gap == null ? null : { ms: res.gap, from: 'timing' };
+  if (t.lap && res.done >= t.lap) {
+    const at = res.lt && res.lt[t.lap - 1], lead = R.leaderAt && R.leaderAt[t.lap];
+    return { ms: at != null && lead != null ? at - lead : res.gap, from: 'through' };
+  }
+  const el = Date.now() - Date.parse(t.at);
+  return el >= (res.gap || 0) ? { ms: el, from: 'timer' } : { ms: res.gap, from: 'timing' };
+}
 function riskOf(r, bib) {
-  const res = resOf(r, bib), cut = cutOf(r);
-  if (!res || !cut || !res.gap || !res.inRace || res.status !== 'OK') return null;
-  return level(res.gap / cut);
+  const b = behindOf(r, bib), cut = cutOf(r);
+  return b && b.ms && cut ? level(b.ms / cut) : null;
+}
+
+// Orange: a rider losing more time than on their own previous lap, e.g. a crash or a mechanical.
+//   - the last lap was slower than the one before;
+//   - they reached their last timing point later into the lap than on the previous lap;
+//   - they are overdue at their next timing point compared with the previous lap;
+//   - they dropped 5 or more places since the end of their last lap.
+// Time losses count when they exceed 20 seconds and 8% of the reference time.
+function lossLimit(ref) { return Math.max(20000, ref * 0.08); }
+function lossOf(r, bib) {
+  if (!racing(r, bib)) return null;
+  const res = resOf(r, bib), R = r.results;
+  if (R.status !== 'InProgress' || !res.lt) return null;
+  const found = [];
+  const lapT = n => res.lt[n - 1] - (n > 1 ? res.lt[n - 2] : 0);  // time for lap n
+  if (res.done >= 3) {
+    const last = lapT(res.done), prev = lapT(res.done - 1), loss = last - prev;
+    if (loss > lossLimit(prev)) found.push({ ms: loss, why: `lap ${res.done} ${fmtDur(loss)} slower` });
+  }
+  const n = res.lap;
+  if (n >= 2 && res.done === n - 1) {
+    const hist = (r.splits && r.splits[bib]) || {};
+    if (res.loc && res.inLap != null && hist[(n - 1) + ':' + res.loc] != null) {
+      const ref = hist[(n - 1) + ':' + res.loc], loss = res.inLap - ref;
+      if (loss > lossLimit(ref)) found.push({ ms: loss, why: `${fmtDur(loss)} down at last split` });
+    }
+    // Next point the rider passed on the previous lap, else the end of that lap.
+    let ref = lapT(n - 1);
+    const next = Object.keys(hist).filter(k => k.startsWith((n - 1) + ':')).map(k => [+k.split(':')[1], hist[k]])
+      .filter(([loc]) => loc > (res.loc || 0)).sort((a, b) => a[0] - b[0])[0];
+    if (next) ref = next[1];
+    const raceNow = R.raceTime + (Date.now() - Date.parse(R.at));
+    const loss = raceNow - res.lt[n - 2] - ref;
+    if (loss > lossLimit(ref)) found.push({ ms: loss, why: `overdue ${fmtDur(loss)}` });
+  }
+  if (res.rankAfter && res.pos - res.rankAfter >= 5) found.push({ ms: 0, why: `down ${res.pos - res.rankAfter} places` });
+  if (!found.length) return null;
+  return found.sort((a, b) => b.ms - a.ms)[0];
 }
 
 /* ---------- Home ---------- */
@@ -496,6 +574,7 @@ function cutLineHtml(r) {
     <span class="key watch">Yellow +${fmtDur(cut * WATCH)}</span><span class="key alert">Red +${fmtDur(cut * ALERT)}</span>`;
 }
 
+function onWatch(r, bib) { return !!(riskOf(r, bib) || lossOf(r, bib)); }
 function renderRace() {
   const r = races[currentId];
   if (!r) return renderHome();
@@ -505,38 +584,74 @@ function renderRace() {
   renderClock();
   const q = $('#search').value.trim().toLowerCase();
   let list = orderedRiders(r);
-  if (filter === 'watch') list = list.filter(x => riskOf(r, x.bib));
+  if (filter === 'watch') list = list.filter(x => onWatch(r, x.bib));
   const rows = list.filter(x => {
     if (!q) return true;
     if (/^\d+$/.test(q)) return x.bib === q || x.bib.startsWith(q);
     return [x.name, x.team, x.nat, x.uciId].join(' ').toLowerCase().includes(q);
   });
-  const empty = filter === 'watch' ? 'Nobody past 50% of the pull time.' : 'No riders match.';
-  $('#rows').innerHTML = rows.map(x => {
-    const res = resOf(r, x.bib), out = res && !['OK'].includes(res.status), risk = riskOf(r, x.bib);
-    const cls = [risk === 'over' ? 'alert over' : risk, out ? 'out' : ''].filter(Boolean).join(' ');
-    return `<tr class="rider ${cls}" data-bib="${esc(x.bib)}">
+  const empty = filter === 'watch' ? 'Nobody to watch right now.' : 'No riders match.';
+  $('#rows').innerHTML = rows.map(x => `<tr class="${rowClass(r, x.bib)}" data-bib="${esc(x.bib)}">
       <td class="num hide-md">${esc(x.start)}${x.flag ? ` <span class="flag">${esc(x.flag)}</span>` : ''}</td>
       <td class="ctr hide-sm">${x.outfit ? `<span class="outfit">${esc(x.outfit)}</span>` : ''}</td>
       <td class="bib">${esc(x.bib)}</td>
-      <td><div class="nm">${esc(x.name)}</div><div class="team">${esc(x.team)}</div></td>
+      <td><div class="nm">${esc(x.name)}</div><div class="team">${esc(x.team)}</div><span class="ltag">${lossHtml(r, x.bib)}</span></td>
       <td class="uciid hide-md">${esc(x.uciId)}</td>
       <td>${esc(x.nat)}</td>
       <td class="num hide-md">${esc(x.yob)}</td>
       <td class="num hide-sm">${esc(x.wcs)}</td>
       <td class="num hide-sm">${esc(x.uci)}</td>
       ${resultCell(r, x.bib)}
-      ${gapCell(r, x.bib, risk)}
-    </tr>`;
-  }).join('') || `<tr><td colspan="11" class="ctr" style="padding:30px;color:var(--muted)">${empty}</td></tr>`;
+      <td class="gap">${gapHtml(r, x.bib)}</td>
+      <td class="ctr">${outOfRace(r, x.bib) ? '' : `<button class="pull-btn" data-pull="${esc(x.bib)}">Pulled</button>`}</td>
+    </tr>`).join('') || `<tr><td colspan="12" class="ctr" style="padding:30px;color:var(--muted)">${empty}</td></tr>`;
 }
 
-function gapCell(r, bib, risk) {
-  const res = resOf(r, bib), cut = cutOf(r);
-  if (!res || res.gap == null || !res.inRace || res.status !== 'OK') return '<td class="gap"></td>';
-  if (!res.gap) return '<td class="gap">Leader</td>';
-  const pct = cut ? `<span class="pct">${Math.round(res.gap / cut * 100)}% of pull time</span>` : '';
-  return `<td class="gap">${risk === 'over' ? '<span class="pull">PULL</span>' : ''}+${fmtDur(res.gap)}${pct}</td>`;
+// Timing already shows these riders as -80%, DNF or DNS.
+function outOfRace(r, bib) { const res = resOf(r, bib); return !!res && res.status !== 'OK'; }
+function rowClass(r, bib) {
+  const res = resOf(r, bib), risk = riskOf(r, bib), loss = lossOf(r, bib);
+  return ['rider', risk === 'over' ? 'alert over' : risk, loss ? 'loss' : '', isPulled(r, bib) ? 'pulled' : '',
+    res && res.status !== 'OK' ? 'out' : ''].filter(Boolean).join(' ');
+}
+function lossHtml(r, bib) {
+  const l = lossOf(r, bib);
+  return l ? `<span class="loss-tag">⚠ ${esc(l.why)}</span>` : '';
+}
+function gapHtml(r, bib) {
+  const b = behindOf(r, bib), cut = cutOf(r);
+  if (!b) return '';
+  if (!b.ms) return 'Leader';
+  const note = { timer: 'not through · timer', through: 'through zone', timing: 'timing gap' }[b.from];
+  const pct = cut ? `${Math.round(b.ms / cut * 100)}% · ` : '';
+  return `${riskOf(r, bib) === 'over' ? '<span class="pull">PULL</span>' : ''}+${fmtDur(b.ms)}<span class="pct">${pct}${note}</span>`;
+}
+// The timer moves every second, so colours and gaps are refreshed in place without rebuilding (or reordering) rows.
+function updateRows() {
+  const r = races[currentId];
+  if (!r) return;
+  const note = liveNoteHtml(r);
+  if ($('#liveNote').innerHTML !== note) $('#liveNote').innerHTML = note;
+  for (const tr of document.querySelectorAll('#rows tr.rider')) {
+    const bib = tr.dataset.bib, cls = rowClass(r, bib), gap = gapHtml(r, bib), loss = lossHtml(r, bib);
+    if (tr.className !== cls) tr.className = cls;
+    const g = tr.querySelector('td.gap'), l = tr.querySelector('.ltag');
+    if (g.innerHTML !== gap) g.innerHTML = gap;
+    if (l.innerHTML !== loss) l.innerHTML = loss;
+  }
+}
+
+let lastPullTap = { bib: null, t: 0 };
+function togglePulled(bib) {
+  const now = Date.now();
+  if (lastPullTap.bib === bib && now - lastPullTap.t < 600) return; // accidental double tap
+  lastPullTap = { bib, t: now };
+  const r = races[currentId], x = r.riders.find(x => x.bib === bib);
+  r.pulled = r.pulled || {};
+  const was = !!r.pulled[bib];
+  if (was) delete r.pulled[bib]; else r.pulled[bib] = true;
+  saveRaces(); renderRace();
+  toast(`#${bib} ${x ? x.name : ''} ${was ? 'no longer shown as pulled' : 'shown as pulled'}`, { id: r.id, pull: bib, was });
 }
 
 /* ---------- 80% zone timer ---------- */
@@ -563,15 +678,18 @@ function renderClock() {
     + (cut ? ` · pull from ${fmtTime(new Date(Date.parse(t.at) + cut).toISOString(), true)}` : ' · set a pull time to see when to pull');
 }
 setInterval(() => { if (currentId) renderClock(); }, 250);
+setInterval(() => { if (currentId) updateRows(); }, 1000);
 
 let lastPass = 0;
 function leaderThrough() {
   if (Date.now() - lastPass < 1500) return; // ignore an accidental double tap
   lastPass = Date.now();
   const r = races[currentId], before = r.timer || null;
-  r.timer = { at: new Date().toISOString(), passes: before ? before.passes + 1 : 1 };
-  saveRaces(); renderClock();
-  toast(`Timer started: leader pass ${r.timer.passes}`, { id: r.id, timer: before });
+  // The lap the leader is finishing as they pass the zone, from live timing. Riders who complete that lap are through.
+  const lead = r.results && Object.values(r.results.byBib).find(b => b.pos === 1 && b.inRace);
+  r.timer = { at: new Date().toISOString(), passes: before ? before.passes + 1 : 1, lap: lead ? lead.lap : null };
+  saveRaces(); renderClock(); updateRows();
+  toast(`Timer started: leader pass ${r.timer.passes}${r.timer.lap ? ` (lap ${r.timer.lap})` : ''}`, { id: r.id, timer: before });
 }
 
 /* ---------- Toast and undo ---------- */
@@ -699,13 +817,27 @@ async function refreshLive(id) {
       const lap = cs.Lap || laps.length + 1;
       let gap = cs.GapWithFirst ?? null;
       if (row.InRace && leaderAt[lap] && ov.RaceTime > leaderAt[lap]) gap = Math.max(gap || 0, ov.RaceTime - leaderAt[lap]);
-      byBib[x.bib] = { pos: row.Pos, status: row.Status, inRace: !!row.InRace, lap, gap };
+      const ranks = row.RanksAfterLapAfterLap || [];
+      byBib[x.bib] = {
+        pos: row.Pos, status: row.Status, inRace: !!row.InRace, lap, gap,
+        done: laps.length,                          // laps completed
+        lt: laps.map(l => l.TotalTime),             // race time at the end of each lap
+        loc: cs.LapLocation || 0,                   // last timing point passed in the current lap
+        inLap: cs.LapTime ?? null,                  // time into the current lap at that point
+        rankAfter: ranks[ranks.length - 1] || null, // position at the end of the last lap
+      };
+      // Remember when each rider reached each timing point on each lap, to compare with the next lap.
+      if (row.InRace && cs.LapLocation && cs.LapTime != null) {
+        const h = (r.splits = r.splits || {})[x.bib] || (r.splits[x.bib] = {});
+        h[lap + ':' + cs.LapLocation] = cs.LapTime;
+      }
     }
     // The leader's first lap: the fastest time to the end of lap 1 across the field.
     const leaderLap1 = leaderAt[1] || null;
     // Started once any rider has crossed a timing point (finish line or intermediate time check).
     const started = ov.OverviewData.some(o => (o.LapDetails || []).length > 0 || (o.CurrentSituation && o.Pos > 0));
-    r.results = { byBib, status: ov.Status, started, curLap: ov.CurLap, maxLaps: ov.MaxLaps, leaderLap1, at: new Date().toISOString() };
+    r.results = { byBib, status: ov.Status, started, curLap: ov.CurLap, maxLaps: ov.MaxLaps, leaderLap1, leaderAt,
+      raceTime: ov.RaceTime, at: new Date().toISOString() };
     saveRaces();
   } catch (e) {
     ls.error = navigator.onLine === false ? 'offline' : 'error';
@@ -718,11 +850,12 @@ async function refreshLive(id) {
 // Riders racing by live position (updated at every timing point around the course), then -80%, DNF, DNS.
 function orderedRiders(r) {
   const res = r.results, live = !!res && (res.status === 'Finished' || !!res.started);
-  if (!live) return r.riders;
+  if (!live) return [...r.riders].sort((a, b) => isPulled(r, a.bib) - isPulled(r, b.bib));
   const later = { R80: 2e5, DNF: 3e5, DSQ: 4e5, DNS: 5e5 };
   const rank = x => {
     const rr = res.byBib[x.bib];
     if (!rr) return 1e6 + (+x.start || 0);
+    if (isPulled(r, x.bib) && rr.status === 'OK') return 1.5e5 + (rr.pos || 9e4);
     return (later[rr.status] || (rr.status === 'OK' ? 0 : 1e5)) + (rr.pos || 9e4);
   };
   return [...r.riders].sort((a, b) => rank(a) - rank(b));
@@ -745,10 +878,16 @@ function liveNoteHtml(r) {
     if (res.status === 'Finished') parts.push('<b>Finished</b>');
     else if (res.maxLaps) parts.push(`<b>Leader lap ${res.curLap} / ${res.maxLaps}</b>${res.curLap === res.maxLaps ? ' <span class="warn">last lap</span>' : ''}`);
     parts.push('updated ' + fmtTime(res.at, true));
-    const n = { over: 0, alert: 0, watch: 0 };
-    for (const x of r.riders) { const k = riskOf(r, x.bib); if (k) n[k]++; }
+    const n = { over: 0, alert: 0, watch: 0, loss: 0, pulled: 0 };
+    for (const x of r.riders) {
+      const k = riskOf(r, x.bib); if (k) n[k]++;
+      if (lossOf(r, x.bib)) n.loss++;
+      if (isPulled(r, x.bib)) n.pulled++;
+    }
     if (n.over) parts.push(`<span class="warn">${n.over} past the pull time</span>`);
     if (n.alert || n.watch) parts.push(`${n.alert} red · ${n.watch} yellow`);
+    if (n.loss) parts.push(`<span class="orange">${n.loss} losing time</span>`);
+    if (n.pulled) parts.push(`${n.pulled} pulled`);
   }
   if (ls.error === 'offline') parts.push('offline, showing last results');
   else if (ls.error === 'error') parts.push('could not reach live timing');
@@ -790,6 +929,7 @@ $('#fileInput').onchange = async e => {
 $('#backBtn').onclick = renderHome;
 $('#raceList').onclick = e => { const c = e.target.closest('.race-card'); if (c) openRace(c.dataset.id); };
 $('#passBtn').onclick = leaderThrough;
+$('#rows').onclick = e => { const b = e.target.closest('[data-pull]'); if (b) togglePulled(b.dataset.pull); };
 $('#cutLine').onclick = e => { if (e.target.closest('#cutBtn')) changeCut(); };
 $('#search').oninput = renderRace;
 $('#filterSeg').onclick = e => {
@@ -818,11 +958,12 @@ $('#toastUndo').onclick = () => {
   if (!r) return;
   // Each undo entry carries exactly the one setting it restores.
   for (const k of ['timer', 'cutOverride']) if (k in u) { if (u[k]) r[k] = u[k]; else delete r[k]; }
+  if ('pull' in u) { r.pulled = r.pulled || {}; if (u.was) r.pulled[u.pull] = true; else delete r.pulled[u.pull]; }
   saveRaces();
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 2;
+const APP_VERSION = 3;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
