@@ -150,6 +150,10 @@ table.sl tr.lapped td.bib { box-shadow: inset 6px 0 0 var(--lap); }
   background: var(--lap); color: #fff; }
 .live-note .lapped-note { color: var(--lap); font-weight: 800; }
 table.sl tr.out td:not(.res) { opacity: .4; }
+table.sl tr.zone-div td { padding: 6px 12px; background: var(--ink); color: var(--card); font-size: 13px; font-weight: 700;
+  border-top: 3px solid var(--accent); border-bottom: 3px solid var(--accent); }
+table.sl tr.zone-div span { margin-right: 18px; letter-spacing: .04em; text-transform: uppercase; }
+table.sl tr.zone-div b { margin-right: 18px; }
 
 @media (max-width: 900px) {
   .hide-md { display: none; }
@@ -524,6 +528,16 @@ function lastZoneGap(r, bib) {
 //   far behind as the timer shows, so the timer counts for them.
 // - Before the first leader pass: the last checkpoint 13 gap known, else the live timing gap.
 // If a checkpoint 13 time was missed, the live timing gap stands in.
+// The lap the 80% zone divider refers to: the leader's latest pass (from the timer, or from timing: the leader's
+// current lap once they are past checkpoint 13, otherwise the lap before).
+function zoneLap(r) {
+  if (r.timer && r.timer.lap) return r.timer.lap;
+  const R = r.results; if (!R || R.status !== 'InProgress') return null;
+  const lead = Object.values(R.byBib).find(b => b.pos === 1 && b.inRace);
+  if (!lead) return null;
+  const L = lead.loc >= zoneLoc(r) ? lead.lap : lead.lap - 1;
+  return L >= 1 ? L : null;
+}
 function behindOf(r, bib) {
   if (!racing(r, bib)) return null;
   const res = resOf(r, bib), t = r.timer;
@@ -667,7 +681,7 @@ function renderRace() {
     return [x.name, x.team, x.nat, x.uciId].join(' ').toLowerCase().includes(q);
   });
   const empty = filter === 'watch' ? 'Nobody to watch right now.' : 'No riders match.';
-  $('#rows').innerHTML = rows.map(x => `<tr class="${rowClass(r, x.bib)}" data-bib="${esc(x.bib)}">
+  const html = rows.map(x => `<tr class="${rowClass(r, x.bib)}" data-bib="${esc(x.bib)}">
       <td class="num hide-md">${esc(x.start)}${x.flag ? ` <span class="flag">${esc(x.flag)}</span>` : ''}</td>
       <td class="ctr hide-sm">${x.outfit ? `<span class="outfit">${esc(x.outfit)}</span>` : ''}</td>
       <td class="bib">${esc(x.bib)}</td>
@@ -681,7 +695,21 @@ function renderRace() {
       <td class="gap">${gapHtml(r, x.bib)}</td>
       <td class="gap live-gap">${liveGapHtml(r, x.bib)}</td>
       <td class="ctr">${outOfRace(r, x.bib) ? '' : `<button class="pull-btn" data-pull="${esc(x.bib)}">Pulled</button>`}</td>
-    </tr>`).join('') || `<tr><td colspan="13" class="ctr" style="padding:30px;color:var(--muted)">${empty}</td></tr>`;
+    </tr>`);
+  // Divider at the 80% zone: riders above it have passed checkpoint 13 on the current zone lap, riders below are
+  // still coming. It is placed after the last rider through, and moves with every live update.
+  const L = zoneLap(r);
+  if (L) {
+    const Z = zoneLoc(r), on = rows.filter(x => racing(r, x.bib));
+    const past = on.filter(x => pastZone(r, resOf(r, x.bib), L));
+    if (on.length) {
+      // Nobody through yet (e.g. just after the leader's pass): the divider sits at the top.
+      const at = past.length ? rows.indexOf(past[past.length - 1]) + 1 : 0;
+      html.splice(at, 0, `<tr class="zone-div"><td colspan="13"><span>80% zone · ck ${Z} · lap ${L}</span>
+        <b>▲ ${past.length} through</b><b>▼ ${on.length - past.length} still to come</b></td></tr>`);
+    }
+  }
+  $('#rows').innerHTML = html.join('') || `<tr><td colspan="13" class="ctr" style="padding:30px;color:var(--muted)">${empty}</td></tr>`;
 }
 
 // Timing already shows these riders as -80%, DNF or DNS.
@@ -1138,7 +1166,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 7;
+const APP_VERSION = 8;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
