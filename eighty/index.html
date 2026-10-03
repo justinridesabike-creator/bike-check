@@ -1114,13 +1114,37 @@ function renderClock() {
   const lv = cut ? level(el / baseOf(r)) : null;
   clock.className = 'clock' + (lv ? ' ' + lv : '');
   $('#clockT').textContent = fmtDur(el) + (lv === 'over' ? '  PULL' : '');
-  $('#clockS').textContent = `Leader pass ${t.passes} at ${fmtTime(t.at, true)}`
+  $('#clockS').textContent = `Leader pass ${t.passes}${t.auto ? ' (auto, estimated from timing)' : ''} at ${fmtTime(t.at, true)}`
     + (cut ? ` · pull from ${fmtTime(new Date(Date.parse(t.at) + cut).toISOString(), true)}` : ' · set a pull time to see when to pull');
 }
 setInterval(() => { if (currentId) renderClock(); }, 250);
 setInterval(() => { if (currentId) updateRows(); }, 1000);
 
 let lastPass = 0;
+// If Leader through wasn't tapped for a lap, start the timer once timing shows the leader at checkpoint 14 (or
+// beyond), from an estimate of when they passed the 80% zone: halfway between their checkpoint 13 and 14 times; if
+// checkpoint 14 wasn't recorded, 25 s after checkpoint 13; if neither was, 60 s before their line crossing.
+function autoTimer(r, show) {
+  const R = r.results;
+  if (!R || R.status !== 'InProgress') return;
+  const leadBib = Object.keys(R.byBib).find(b => R.byBib[b].pos === 1 && R.byBib[b].inRace && R.byBib[b].status === 'OK');
+  if (!leadBib) return;
+  const lead = R.byBib[leadBib], Z = zoneLoc(r);
+  const L = lead.loc >= Z + 1 ? lead.lap : lead.lap - 1;   // latest lap on which the leader is past checkpoint 14
+  if (L < 1 || (r.timer && r.timer.lap >= L)) return;
+  const h = (r.splits && r.splits[leadBib]) || {}, start = L > 1 ? lead.lt[L - 2] : 0;
+  const t13 = h[L + ':' + Z] != null && start != null ? start + h[L + ':' + Z] : null;
+  const t14 = h[L + ':' + (Z + 1)] != null && start != null ? start + h[L + ':' + (Z + 1)] : null;
+  let est = null;
+  if (t13 != null && t14 != null && t14 > t13) est = (t13 + t14) / 2;
+  else if (t13 != null) est = t13 + 25000;
+  else if (lead.lt[L - 1] != null) est = lead.lt[L - 1] - 60000;
+  if (est == null) return;
+  const before = r.timer || null;
+  r.timer = { at: wallOf(r, est), passes: before ? before.passes + 1 : 1, lap: L, auto: true };
+  if (show) toast(`Timer auto-started for lap ${L}: leader passed the 80% zone at about ${fmtTime(r.timer.at, true)}`, { id: r.id, timer: before });
+}
+
 function leaderThrough() {
   if (Date.now() - lastPass < 1500) return; // ignore an accidental double tap
   lastPass = Date.now();
@@ -1130,7 +1154,9 @@ function leaderThrough() {
   const R = r.results, lead = R && Object.values(R.byBib).find(b => b.pos === 1 && b.inRace);
   let lap = lead ? lead.lap : null;
   if (lead && lead.done && lead.lt && R.raceTime + (Date.now() - Date.parse(R.at)) - lead.lt[lead.done - 1] < 60000) lap = lead.done;
-  r.timer = { at: new Date().toISOString(), passes: before ? before.passes + 1 : 1, lap };
+  // A tap on the lap the app auto-started replaces the estimate rather than counting another pass.
+  const passes = before ? (before.auto && before.lap === lap ? before.passes : before.passes + 1) : 1;
+  r.timer = { at: new Date().toISOString(), passes, lap };
   saveRaces(); renderClock(); updateRows();
   toast(`Timer started: leader pass ${r.timer.passes}${r.timer.lap ? ` (lap ${r.timer.lap})` : ''}`, { id: r.id, timer: before });
 }
@@ -1365,6 +1391,7 @@ async function refreshLive(id) {
     const curLap = Math.max(0, ...Object.values(byBib).filter(b => b.inRace && b.status === 'OK').map(b => b.lap)) || ov.CurLap;
     r.results = { byBib, status: ov.Status, started, curLap, normalLap, maxLaps: ov.MaxLaps, leaderLap1, leaderAt,
       raceTime: ov.RaceTime, at: new Date().toISOString() };
+    autoTimer(r, currentId === id);
     // Live timing says the race is over: stop and reset the 80% timer.
     if (ov.Status === 'Finished' && r.timer) {
       delete r.timer;
@@ -1530,7 +1557,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 28;
+const APP_VERSION = 29;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
