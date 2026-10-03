@@ -136,6 +136,9 @@ table.sl tr.loss td.bib { box-shadow: inset 6px 0 0 var(--loss); }
 .eta { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .eta.soon { color: var(--lap); font-weight: 800; }
 .eta.late { color: var(--over); font-weight: 800; }
+.safe-tag { display: inline-block; margin-top: 3px; font-size: 12px; font-weight: 900; padding: 2px 7px; border-radius: 6px;
+  background: var(--ok); color: #fff; }
+.live-note .safe-note { color: var(--ok); font-weight: 800; }
 .loss-tag { display: inline-block; margin-top: 3px; font-size: 12px; font-weight: 800; padding: 2px 7px; border-radius: 6px;
   background: var(--loss); color: #fff; }
 .live-note .orange { color: var(--loss); font-weight: 700; }
@@ -241,7 +244,8 @@ table.sl tr.zone-div b { margin-right: 18px; }
     Red: past 75%. PULL: past 80% (the pull time). Orange: losing more time than on their previous lap (crash or mechanical?). Pulsing blue: lapped, not at checkpoint 13 since your
     previous Leader through tap, so look for them.
     Under each name: expected arrival at the 80% zone from the rider's earlier laps and current pace, and a forecast:
-    <b>PULL LIKELY</b> if their projected gap there is past the pull time, <b>Possible pull</b> if past 75% or heading there. <b>Pulled</b> only changes how a rider is shown.</p>
+    <b>PULL LIKELY</b> if their projected gap there is past the pull time, <b>Possible pull</b> if past 75% or heading there. <b>SAFE</b>: took the bell (crossed the line after the leader started the last lap) or the leader has finished; no more pulls for them.
+    <b>Pulled</b> only changes how a rider is shown.</p>
 </section>
 
 <div id="toast" class="toast hidden"><span id="toastMsg"></span><button id="toastUndo">Undo</button></div>
@@ -564,11 +568,27 @@ function behindOf(r, bib) {
 // Lapped: the leader has come through the zone again (timer restarted) and this rider hasn't reached the zone
 // checkpoint since the previous pass, i.e. not even on the previous lap. They pulse until they reach checkpoint 13
 // (they are then at the zone) or are marked pulled.
+// Safe to finish: nobody is pulled once the leader has finished, so a rider is safe once the leader has finished,
+// or once they have taken the bell (crossed the line after the leader started the last lap): the leader will
+// finish before they reach the zone again.
+function leaderFinished(r) {
+  const R = r.results;
+  return !!R && (R.status === 'Finished' || (R.maxLaps && R.leaderAt && R.leaderAt[R.maxLaps] != null));
+}
+function safeOf(r, bib) {
+  if (!racing(r, bib)) return null;
+  const R = r.results, res = resOf(r, bib);
+  if (leaderFinished(r)) return 'leader finished';
+  const bell = R.maxLaps > 1 && R.leaderAt && R.leaderAt[R.maxLaps - 1];
+  if (bell != null && res.done && res.lt[res.done - 1] >= bell) return 'one to go';
+  return null;
+}
 function lappedOf(r, bib) {
   const t = r.timer, res = resOf(r, bib);
-  return !!(t && t.lap && t.passes > 1 && racing(r, bib) && !pastZone(r, res, t.lap - 1));
+  return !!(t && t.lap && t.passes > 1 && racing(r, bib) && !safeOf(r, bib) && !pastZone(r, res, t.lap - 1));
 }
 function riskOf(r, bib) {
+  if (safeOf(r, bib)) return null;
   const b = behindOf(r, bib), cut = cutOf(r);
   return b && b.ms && cut ? level(b.ms / baseOf(r)) : null;
 }
@@ -796,6 +816,7 @@ function lossPerLap(r, bib) {
 //   possible - projected gap is past 75% of lap 1, or at the rate they are losing time they pass the pull time on a
 //              later lap (before the race ends).
 function pullForecast(r, bib) {
+  if (safeOf(r, bib)) return null;
   const e = zoneEta(r, bib), cut = cutOf(r);
   if (!e || !cut) return null;
   const R = r.results, base = baseOf(r);
@@ -824,6 +845,7 @@ function forecastHtml(r, bib) {
 }
 
 function etaHtml(r, bib) {
+  if (safeOf(r, bib)) return '';
   const e = zoneEta(r, bib);
   if (!e) return '';
   const R = r.results, raceNow = R.raceTime + (Date.now() - Date.parse(R.at));
@@ -834,8 +856,9 @@ function etaHtml(r, bib) {
 }
 
 function lossHtml(r, bib) {
-  const l = lossOf(r, bib);
-  return (lappedOf(r, bib) ? '<span class="lap-tag">LAPPED · look for</span> ' : '')
+  const l = lossOf(r, bib), safe = safeOf(r, bib);
+  return (safe ? `<span class="safe-tag">SAFE · ${safe}</span> ` : '')
+    + (lappedOf(r, bib) ? '<span class="lap-tag">LAPPED · look for</span> ' : '')
     + (l ? `<span class="loss-tag">⚠ ${esc(l.why)}</span>` : '');
 }
 // "At ck 13" column: the 80% figure.
@@ -1147,6 +1170,8 @@ function liveNoteHtml(r) {
     if (n.pulled) parts.push(`${n.pulled} pulled`);
     const lapped = orderedRiders(r).filter(x => lappedOf(r, x.bib)).map(x => '#' + x.bib);
     if (lapped.length) parts.push(`<span class="lapped-note">Look for lapped: ${lapped.join(' ')}</span>`);
+    if (leaderFinished(r)) parts.push('<span class="safe-note">Leader finished: no more pulls</span>');
+    else if (res.maxLaps && res.curLap === res.maxLaps) parts.push('<span class="safe-note">Riders crossing the line now have one to go and are safe</span>');
     // Likely pulls in the order they should reach the zone.
     const likely = r.riders.map(x => ({ x, f: pullForecast(r, x.bib) })).filter(o => o.f && o.f.kind === 'likely').sort((a, b) => a.f.at - b.f.at);
     if (likely.length) parts.push(`<span class="likely-note">Likely pulls: ${likely.map(o => '#' + o.x.bib).join(' ')}</span>`);
@@ -1234,7 +1259,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 10;
+const APP_VERSION = 11;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
