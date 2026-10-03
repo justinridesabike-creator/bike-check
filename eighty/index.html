@@ -928,8 +928,9 @@ function renderClock() {
   const clock = $('#clock');
   if (!t) {
     clock.className = 'clock';
-    $('#clockT').textContent = '0:00';
-    $('#clockS').textContent = 'Tap Leader through when the leader passes the 80% zone';
+    const done = r.results && r.results.status === 'Finished';
+    $('#clockT').textContent = done ? 'Race finished' : '0:00';
+    $('#clockS').textContent = done ? 'Timer stopped: no more pulls' : 'Tap Leader through when the leader passes the 80% zone';
     return;
   }
   const el = Date.now() - Date.parse(t.at);
@@ -1110,6 +1111,11 @@ async function refreshLive(id) {
     const started = ov.OverviewData.some(o => (o.LapDetails || []).length > 0 || (o.CurrentSituation && o.Pos > 0));
     r.results = { byBib, status: ov.Status, started, curLap: ov.CurLap, maxLaps: ov.MaxLaps, leaderLap1, leaderAt,
       raceTime: ov.RaceTime, at: new Date().toISOString() };
+    // Live timing says the race is over: stop and reset the 80% timer.
+    if (ov.Status === 'Finished' && r.timer) {
+      delete r.timer;
+      if (currentId === id) toast('Race finished: 80% timer stopped and reset');
+    }
     saveRaces();
   } catch (e) {
     ls.error = navigator.onLine === false ? 'offline' : 'error';
@@ -1259,7 +1265,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 11;
+const APP_VERSION = 12;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
