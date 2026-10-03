@@ -16,7 +16,7 @@
   --accent: #6d28d9; --danger: #b91c1c; --chip: #eef1f6; --ok: #15803d; --dnf: #c2410c;
   --watch-bg: #fde68a; --watch-ink: #713f12; --alert-bg: #fecaca; --alert-ink: #7f1d1d; --over: #dc2626;
   --loss: #ea580c; --loss-bg: #fdba74; --loss-ink: #7c2d12;
-  --lap: #2563eb; --lap-bg: #bfdbfe; --lap-ink: #0b1f4d;
+  --lap: #2563eb; --lap-bg: #bfdbfe; --lap-ink: #0b1f4d; --poss: #b45309;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -24,7 +24,7 @@
     --accent: #a78bfa; --danger: #f87171; --chip: #232731; --ok: #4ade80; --dnf: #fb923c;
     --watch-bg: #4a3b0a; --watch-ink: #fde68a; --alert-bg: #4c1414; --alert-ink: #fecaca; --over: #ef4444;
     --loss: #fb923c; --loss-bg: #5a2a0c; --loss-ink: #fed7aa;
-    --lap: #3b82f6; --lap-bg: #10244d; --lap-ink: #dbeafe;
+    --lap: #3b82f6; --lap-bg: #10244d; --lap-ink: #dbeafe; --poss: #fbbf24;
   }
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
@@ -129,6 +129,10 @@ table.sl tr.over td.bib { box-shadow: inset 6px 0 0 var(--over); }
 table.sl tr.loss:not(.alert) td { background: var(--loss-bg); color: var(--loss-ink); }
 table.sl tr.loss:not(.alert) .team, table.sl tr.loss:not(.alert) .pct, table.sl tr.loss:not(.alert) .uciid { color: var(--loss-ink); }
 table.sl tr.loss td.bib { box-shadow: inset 6px 0 0 var(--loss); }
+.fc { display: inline-block; margin-top: 3px; font-size: 12px; font-weight: 800; padding: 2px 7px; border-radius: 6px; }
+.fc.likely { background: var(--over); color: #fff; }
+.fc.possible { border: 2px solid var(--poss); color: var(--poss); background: transparent; }
+.live-note .likely-note { color: var(--over); font-weight: 800; }
 .eta { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .eta.soon { color: var(--lap); font-weight: 800; }
 .eta.late { color: var(--over); font-weight: 800; }
@@ -236,7 +240,8 @@ table.sl tr.zone-div b { margin-right: 18px; }
     as the timer; riders past it show their gap at checkpoint 13. <b>Live gap</b> follows timing round the course, with ▲ time lost or ▼ gained since checkpoint 13. Yellow: past 50% of the leader's first lap.
     Red: past 75%. PULL: past 80% (the pull time). Orange: losing more time than on their previous lap (crash or mechanical?). Pulsing blue: lapped, not at checkpoint 13 since your
     previous Leader through tap, so look for them.
-    Under each name: expected arrival at the 80% zone from the rider's earlier laps and current pace. <b>Pulled</b> only changes how a rider is shown.</p>
+    Under each name: expected arrival at the 80% zone from the rider's earlier laps and current pace, and a forecast:
+    <b>PULL LIKELY</b> if their projected gap there is past the pull time, <b>Possible pull</b> if past 75% or heading there. <b>Pulled</b> only changes how a rider is shown.</p>
 </section>
 
 <div id="toast" class="toast hidden"><span id="toastMsg"></span><button id="toastUndo">Undo</button></div>
@@ -668,7 +673,7 @@ function cutLineHtml(r) {
     <span class="key over">Pull 80% +${fmtDur(cut)}</span>`;
 }
 
-function onWatch(r, bib) { return !!(riskOf(r, bib) || lossOf(r, bib) || lappedOf(r, bib)); }
+function onWatch(r, bib) { return !!(riskOf(r, bib) || lossOf(r, bib) || lappedOf(r, bib) || pullForecast(r, bib)); }
 function renderRace() {
   const r = races[currentId];
   if (!r) return renderHome();
@@ -690,7 +695,7 @@ function renderRace() {
       <td class="num hide-md">${esc(x.start)}${x.flag ? ` <span class="flag">${esc(x.flag)}</span>` : ''}</td>
       <td class="ctr hide-sm">${x.outfit ? `<span class="outfit">${esc(x.outfit)}</span>` : ''}</td>
       <td class="bib">${esc(x.bib)}</td>
-      <td><div class="nm">${esc(x.name)}</div><div class="team">${esc(x.team)}</div><span class="ltag">${lossHtml(r, x.bib)}</span><span class="etag">${etaHtml(r, x.bib)}</span></td>
+      <td><div class="nm">${esc(x.name)}</div><div class="team">${esc(x.team)}</div><span class="ltag">${lossHtml(r, x.bib)}</span><span class="etag">${etaHtml(r, x.bib)}${forecastHtml(r, x.bib)}</span></td>
       <td class="uciid hide-md">${esc(x.uciId)}</td>
       <td>${esc(x.nat)}</td>
       <td class="num hide-md">${esc(x.yob)}</td>
@@ -731,6 +736,17 @@ function median(a) { const v = a.filter(x => x != null && x > 0).sort((x, y) => 
 //   their earlier lap times scaled by where checkpoint 13 sits in the lap for the rest of the field;
 // - pace: how they are doing this lap at their latest checkpoint compared with the same checkpoint on earlier laps.
 // Once past checkpoint 13 on this lap, the estimate is for the next lap.
+// Where checkpoint 13 sits in a lap, as a share of the lap time, from every rider seen at it (laps after the first,
+// against that rider's typical lap).
+function zoneShare(r) {
+  const R = r.results, Z = zoneLoc(r), shares = [];
+  for (const [b, hh] of Object.entries(r.splits || {})) {
+    const rr = R.byBib[b]; if (!rr || !rr.lt || rr.lt.length < 2) continue;
+    const typical = median(rr.lt.slice(1).map((t, i) => t - rr.lt[i]));
+    for (const [k, t] of Object.entries(hh)) if (+k.split(':')[1] === Z && +k.split(':')[0] > 1 && typical) shares.push(t / typical);
+  }
+  return median(shares);
+}
 function zoneEta(r, bib) {
   if (!racing(r, bib) || !r.results || r.results.status !== 'InProgress') return null;
   const res = resOf(r, bib), R = r.results, Z = zoneLoc(r), h = (r.splits && r.splits[bib]) || {};
@@ -744,17 +760,7 @@ function zoneEta(r, bib) {
   const refLap = earlier(laps);
   // Where checkpoint 13 sits in a lap, as a share of the lap time, from every rider seen at it.
   let ref13 = at(Z);
-  if (ref13 == null && refLap) {
-    const shares = [];
-    for (const [b, hh] of Object.entries(r.splits || {})) {
-      const rr = R.byBib[b]; if (!rr || !rr.lt || rr.lt.length < 2) continue;
-      // That rider's typical lap (laps after the first).
-      const typical = median(rr.lt.slice(1).map((t, i) => t - rr.lt[i]));
-      for (const [k, t] of Object.entries(hh)) if (+k.split(':')[1] === Z && +k.split(':')[0] > 1 && typical) shares.push(t / typical);
-    }
-    const share = median(shares);
-    if (share) ref13 = refLap * share;
-  }
+  if (ref13 == null && refLap) { const share = zoneShare(r); if (share) ref13 = refLap * share; }
   if (ref13 == null) return null;
   // Current pace against earlier laps at the latest checkpoint (kept within sensible bounds).
   let pace = 1;
@@ -763,6 +769,60 @@ function zoneEta(r, bib) {
   if (!refLap || (R.maxLaps && n >= R.maxLaps)) return null; // past the zone on the last lap: no more passes
   return { t: lapStart + refLap * pace + ref13, lap: n + 1 };
 }
+/* ---------- Likely pulls ---------- */
+// The leader's time at checkpoint 13 on a lap: recorded if it has happened (else worked out from the leader's lap
+// times and where checkpoint 13 sits in a lap), or the leader's own expected arrival if it is still to come.
+function leaderZoneEst(r, lap) {
+  const R = r.results, known = leaderZoneTime(r, lap);
+  if (known != null) return known;
+  const lead = Object.keys(R.byBib).find(b => R.byBib[b].pos === 1 && R.byBib[b].inRace);
+  if (!lead) return null;
+  const e = zoneEta(r, lead);
+  if (e && e.lap === lap) return e.t;
+  const la = R.leaderAt || {}, share = zoneShare(r);
+  if (la[lap] != null && share) { const start = lap > 1 ? la[lap - 1] : 0; if (start != null) return start + (la[lap] - start) * share; }
+  return null;
+}
+// Gap to the leader at the end of each completed lap, to see how fast a rider is losing time.
+function lossPerLap(r, bib) {
+  const res = resOf(r, bib), la = r.results.leaderAt || {}, g = [];
+  for (let k = 2; k <= res.done; k++) if (la[k] != null) g.push(res.lt[k - 1] - la[k]);
+  if (g.length < 2) return null;
+  const recent = g.slice(-3);
+  return (recent[recent.length - 1] - recent[0]) / (recent.length - 1);
+}
+// Projection for the rider's next pass of the 80% zone:
+//   likely   - projected gap there is past the pull time, or the leader should reach the zone a lap ahead first;
+//   possible - projected gap is past 75% of lap 1, or at the rate they are losing time they pass the pull time on a
+//              later lap (before the race ends).
+function pullForecast(r, bib) {
+  const e = zoneEta(r, bib), cut = cutOf(r);
+  if (!e || !cut) return null;
+  const R = r.results, base = baseOf(r);
+  const lapAhead = leaderZoneEst(r, e.lap + 1);
+  if (lapAhead != null && lapAhead < e.t) return { kind: 'likely', lap: e.lap, at: e.t, lapped: true };
+  const lead = leaderZoneEst(r, e.lap);
+  if (lead == null) return null;
+  const gap = e.t - lead;
+  if (gap >= cut) return { kind: 'likely', lap: e.lap, at: e.t, gap };
+  if (gap >= base * ALERT) return { kind: 'possible', lap: e.lap, at: e.t, gap };
+  const per = lossPerLap(r, bib);
+  if (per && per > 5000) {
+    const lap = e.lap + Math.ceil((cut - gap) / per);
+    // Only up to the lap before the last: nobody was pulled on the leader's final lap at Lake Placid.
+    if (!R.maxLaps || lap < R.maxLaps) return { kind: 'possible', lap, at: e.t, gap, trend: per };
+  }
+  return null;
+}
+function forecastHtml(r, bib) {
+  const f = pullForecast(r, bib);
+  if (!f) return '';
+  const pct = f.gap != null ? ` · proj +${fmtDur(f.gap)} (${Math.round(f.gap / baseOf(r) * 100)}%)` : '';
+  if (f.kind === 'likely') return `<span class="fc likely">PULL LIKELY · lap ${f.lap}${f.lapped ? ' · leader there first' : pct}</span>`;
+  if (f.trend) return `<span class="fc possible">Possible pull · lap ${f.lap} at this rate (losing ${fmtDur(f.trend)}/lap)</span>`;
+  return `<span class="fc possible">Possible pull · lap ${f.lap}${pct}</span>`;
+}
+
 function etaHtml(r, bib) {
   const e = zoneEta(r, bib);
   if (!e) return '';
@@ -814,7 +874,7 @@ function updateRows() {
     const g = tr.querySelector('td.gap'), lg = tr.querySelector('td.live-gap'), l = tr.querySelector('.ltag');
     if (g.innerHTML !== gap) g.innerHTML = gap;
     if (lg.innerHTML !== live) lg.innerHTML = live;
-    const e = tr.querySelector('.etag'), eta = etaHtml(r, bib);
+    const e = tr.querySelector('.etag'), eta = etaHtml(r, bib) + forecastHtml(r, bib);
     if (e.innerHTML !== eta) e.innerHTML = eta;
     if (l.innerHTML !== loss) l.innerHTML = loss;
   }
@@ -1087,6 +1147,9 @@ function liveNoteHtml(r) {
     if (n.pulled) parts.push(`${n.pulled} pulled`);
     const lapped = orderedRiders(r).filter(x => lappedOf(r, x.bib)).map(x => '#' + x.bib);
     if (lapped.length) parts.push(`<span class="lapped-note">Look for lapped: ${lapped.join(' ')}</span>`);
+    // Likely pulls in the order they should reach the zone.
+    const likely = r.riders.map(x => ({ x, f: pullForecast(r, x.bib) })).filter(o => o.f && o.f.kind === 'likely').sort((a, b) => a.f.at - b.f.at);
+    if (likely.length) parts.push(`<span class="likely-note">Likely pulls: ${likely.map(o => '#' + o.x.bib).join(' ')}</span>`);
   }
   if (ls.error === 'offline') parts.push('offline, showing last results');
   else if (ls.error === 'error') parts.push('could not reach live timing');
@@ -1171,7 +1234,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 9;
+const APP_VERSION = 10;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
