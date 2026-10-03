@@ -501,6 +501,7 @@ function fmtTime(iso, secs) {
 // Milliseconds as m:ss (or h:mm:ss).
 function fmtDur(ms) {
   if (ms == null || isNaN(ms)) return '';
+  if (ms < 0) return '-' + fmtDur(-ms);
   const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, ss = String(s % 60).padStart(2, '0');
   return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }
@@ -553,12 +554,18 @@ function leaderZoneTime(r, lap) {
   let lead = null;
   if (R.leaderAt && R.leaderAt[lap] != null) lead = Object.keys(R.byBib).find(b => (R.byBib[b].lt || [])[lap - 1] === R.leaderAt[lap]);
   else lead = Object.keys(R.byBib).find(b => R.byBib[b].pos === 1 && R.byBib[b].inRace);
-  return lead ? zoneTime(r, lead, lap) : null;
+  const own = lead ? zoneTime(r, lead, lap) : null;
+  if (own == null) return null;
+  // The rider first across the line may not have led at checkpoint 13 (places can change in the last stretch, as with
+  // Colombo on lap 1 of the Lake Placid men's elite race), so take the earliest checkpoint 13 time recorded that lap.
+  let best = own;
+  for (const x of r.riders) { const t = zoneTime(r, x.bib, lap); if (t != null && t < best) best = t; }
+  return best;
 }
 // The rider's gap to the leader at the zone checkpoint on a lap, if both passes were captured.
 function zoneGap(r, bib, lap) {
   const at = zoneTime(r, bib, lap), lead = leaderZoneTime(r, lap);
-  return at != null && lead != null ? at - lead : null;
+  return at != null && lead != null ? Math.max(0, at - lead) : null;
 }
 // The most recent lap on which the rider's checkpoint 13 gap is known.
 function lastZoneGap(r, bib) {
@@ -1447,7 +1454,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 23;
+const APP_VERSION = 24;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
