@@ -108,6 +108,9 @@ td.res .rs.bad { background: var(--danger); color: #fff; }
 td.res .rs.dnf { background: var(--dnf); color: #fff; }
 td.res .rs.r80 { background: var(--accent); color: #fff; }
 td.res .live { display: block; font-size: 10px; font-weight: 700; color: var(--ok); }
+td.res .split { display: block; font-size: 11px; font-weight: 700; color: var(--muted); }
+td.res .sbar { display: block; width: 40px; height: 4px; margin: 2px auto 0; border-radius: 2px; background: var(--line); overflow: hidden; }
+td.res .sbar i { display: block; height: 100%; background: var(--ok); }
 td.gap { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 18px; font-weight: 700; }
 td.gap .pct { display: block; font-size: 11px; font-weight: 700; color: var(--muted); }
 td.gap .pull { display: inline-block; font-size: 11px; font-weight: 900; padding: 1px 6px; border-radius: 5px; background: var(--over); color: #fff; margin-right: 4px; vertical-align: 2px; }
@@ -391,7 +394,7 @@ async function importFile(file) {
   const id = [meta.date, meta.discipline, meta.category, meta.startTime].filter(Boolean).join(' | ') || file.name;
   const existing = races[id];
   // Re-importing a revised start list keeps the race's pull time, timer, pulled riders and live link.
-  const keep = existing ? { cutOverride: existing.cutOverride, timer: existing.timer, pulled: existing.pulled, splits: existing.splits,
+  const keep = existing ? { cutOverride: existing.cutOverride, timer: existing.timer, pulled: existing.pulled, splits: existing.splits, maxLoc: existing.maxLoc,
     live: existing.live, results: existing.results } : {};
   races[id] = {
     id, meta, riders, ...keep,
@@ -828,6 +831,12 @@ async function refreshLive(id) {
     for (const o of ov.OverviewData) for (const l of o.LapDetails || []) {
       if (l.TotalTime > 0 && !(leaderAt[l.LapNr] <= l.TotalTime)) leaderAt[l.LapNr] = l.TotalTime;
     }
+    // Timing checkpoints around the lap are numbered in course order (1, 2, ... before the finish line, 0 at the line).
+    // The feed doesn't say how many there are, so remember the highest one any rider has reached in this race.
+    for (const o of ov.OverviewData) {
+      const loc = o.CurrentSituation && o.CurrentSituation.LapLocation;
+      if (loc > (r.maxLoc || 0)) r.maxLoc = loc;
+    }
     const byBib = {};
     for (const x of r.riders) {
       let dos = x.uciId && byUci[x.uciId];
@@ -836,7 +845,8 @@ async function refreshLive(id) {
       if (!row) continue;
       const cs = row.CurrentSituation || {};
       const laps = row.LapDetails || [];
-      const lap = cs.Lap || laps.length + 1;
+      // At the line (checkpoint 0) timing still reports the lap just completed; the rider is starting the next one.
+      const lap = cs.LapLocation === 0 && laps.length >= (cs.Lap || 0) ? laps.length + 1 : cs.Lap || laps.length + 1;
       let gap = cs.GapWithFirst ?? null;
       if (row.InRace && leaderAt[lap] && ov.RaceTime > leaderAt[lap]) gap = Math.max(gap || 0, ov.RaceTime - leaderAt[lap]);
       const ranks = row.RanksAfterLapAfterLap || [];
@@ -887,9 +897,17 @@ function resultCell(r, bib) {
   const res = resOf(r, bib);
   if (!res) return '<td class="res"></td>';
   const label = resultLabel(res);
-  if (res.status === 'OK') return `<td class="res">${esc(label)}${res.inRace ? `<span class="live">LAP ${res.lap}</span>` : ''}</td>`;
+  if (res.status === 'OK') return `<td class="res">${esc(label)}${res.inRace ? `<span class="live">LAP ${res.lap}</span>${splitHtml(r, res)}` : ''}</td>`;
   const cls = res.status === 'DNF' ? 'dnf' : res.status === 'R80' ? 'r80' : 'bad';
   return `<td class="res"><span class="rs ${cls}">${esc(label)}</span></td>`;
+}
+
+// Which timing checkpoint the rider last passed on this lap, e.g. "8/14", with a small bar for how far round they are.
+function splitHtml(r, res) {
+  const max = r.maxLoc;
+  if (!max || res.loc == null) return '';
+  const label = res.loc ? `${res.loc}/${max}` : 'line';
+  return `<span class="split">${label}</span><span class="sbar"><i style="width:${Math.round(res.loc / max * 100)}%"></i></span>`;
 }
 
 function liveNoteHtml(r) {
@@ -987,7 +1005,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 4;
+const APP_VERSION = 5;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
