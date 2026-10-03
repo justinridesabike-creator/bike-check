@@ -1076,8 +1076,9 @@ function togglePulled(bib) {
   lastPullTap = { bib, t: now };
   const r = races[currentId], x = r.riders.find(x => x.bib === bib);
   r.pulled = r.pulled || {};
-  const was = !!r.pulled[bib];
-  if (was) delete r.pulled[bib]; else r.pulled[bib] = true;
+  const was = r.pulled[bib] || null;
+  // Store when it was tapped, so pulled riders are listed in the order they were pulled.
+  if (was) delete r.pulled[bib]; else r.pulled[bib] = now;
   saveRaces(); renderRace();
   toast(`#${bib} ${x ? x.name : ''} ${was ? 'no longer shown as pulled' : 'shown as pulled'}`, { id: r.id, pull: bib, was });
 }
@@ -1413,15 +1414,23 @@ async function refreshLive(id) {
   }
 }
 
-// Riders racing by live position (updated at every timing point around the course), then -80%, DNF, DNS.
+// Riders marked Pulled, in the order they were tapped (marks saved by older versions, without a time, come first).
+function pulledOrder(r) {
+  const p = r.pulled || {};
+  return Object.keys(p).sort((a, b) => (p[a] === true ? 0 : p[a]) - (p[b] === true ? 0 : p[b]));
+}
+// Running order: riders still racing by live position; then riders marked Pulled in the order they were pulled;
+// then riders timing has at -80% (not marked), DNF, DSQ, DNS.
 function orderedRiders(r) {
   const res = r.results, live = !!res && (res.status === 'Finished' || !!res.started);
-  if (!live) return [...r.riders].sort((a, b) => isPulled(r, a.bib) - isPulled(r, b.bib));
+  const pOrder = pulledOrder(r);
+  const pulledRank = b => 1.5e5 + pOrder.indexOf(b);
+  if (!live) return [...r.riders].sort((a, b) => (isPulled(r, a.bib) ? pulledRank(a.bib) : 0) - (isPulled(r, b.bib) ? pulledRank(b.bib) : 0));
   const later = { R80: 2e5, DNF: 3e5, DSQ: 4e5, DNS: 5e5 };
   const rank = x => {
     const rr = res.byBib[x.bib];
+    if (isPulled(r, x.bib)) return pulledRank(x.bib);
     if (!rr) return 1e6 + (+x.start || 0);
-    if (isPulled(r, x.bib) && rr.status === 'OK') return 1.5e5 + (rr.pos || 9e4);
     return (later[rr.status] || (rr.status === 'OK' ? 0 : 1e5)) + (rr.pos || 9e4);
   };
   return [...r.riders].sort((a, b) => rank(a) - rank(b));
@@ -1558,12 +1567,12 @@ $('#toastUndo').onclick = () => {
   if (!r) return;
   // Each undo entry carries exactly the one setting it restores.
   for (const k of ['timer', 'cutOverride']) if (k in u) { if (u[k]) r[k] = u[k]; else delete r[k]; }
-  if ('pull' in u) { r.pulled = r.pulled || {}; if (u.was) r.pulled[u.pull] = true; else delete r.pulled[u.pull]; }
+  if ('pull' in u) { r.pulled = r.pulled || {}; if (u.was) r.pulled[u.pull] = u.was; else delete r.pulled[u.pull]; }
   saveRaces();
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 30;
+const APP_VERSION = 31;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {

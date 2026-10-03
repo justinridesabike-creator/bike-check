@@ -1,5 +1,5 @@
 // Offline cache: bump VERSION (and APP_VERSION in index.html) whenever app files change.
-const VERSION = 'pull80-v30';
+const VERSION = 'pull80-v31';
 const FILES = ['./', 'index.html', 'manifest.json', 'icon-180.png', 'icon-512.png',
   'vendor/pdf.min.js', 'vendor/pdf.worker.min.js'];
 
