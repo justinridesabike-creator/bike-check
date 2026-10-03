@@ -1258,19 +1258,41 @@ async function refreshLive(id) {
     const allLaps = [];
     for (const o of ov.OverviewData) for (const l of o.LapDetails || []) if (l.LapTime > 0) allLaps.push(l.LapTime);
     const normalLap = median(allLaps);
+    // Timing can record a false finish-line crossing near the line (Lake Placid men's elite). Two cases seen:
+    //   - an extra crossing: Braidot got 7:55 then 1:19 instead of one 9:14 lap (one crossing too many);
+    //   - a misplaced one: Avondetto got 17:03 then 1:20 (his real crossing missing, a false one 1:20 early).
+    // A lap is suspect if under half a normal lap, over 12% faster than both his previous lap and a normal lap, or
+    // (for a rider timing still has near the front) over 1.6 normal laps. The false crossing is the one that doesn't
+    // line up with the field's crossings. If the rider then has more crossings than the field leaders had completed,
+    // it is removed; otherwise it is moved to one typical lap from its neighbour.
+    // Riders whose laps all look normal (not suspiciously fast or long) set the field's crossing times.
+    const okRider = o => (o.LapDetails || []).every(l => l.LapTime > normalLap * 0.88 && l.LapTime < normalLap * 1.6);
+    const fieldAt = [];
+    for (const o of ov.OverviewData) if (normalLap && okRider(o)) (o.LapDetails || []).forEach((l, i) => { if (!(fieldAt[i] <= l.TotalTime)) fieldAt[i] = l.TotalTime; });
+    const fieldCount = T => fieldAt.filter(v => v <= T + 5000).length;
+    const offField = v => fieldAt.length ? Math.min(...fieldAt.map(f => Math.abs(f - v))) : 0;
     const clean = {};
     for (const o of ov.OverviewData) {
       const t = (o.LapDetails || []).map(l => l.TotalTime).filter(v => v > 0);
+      const gapNow = (o.CurrentSituation || {}).GapWithFirst;
+      const nearFront = gapNow != null && normalLap && gapNow < normalLap * 0.3;
       let removed = 0, firstBad = null;
-      for (let i = 1; normalLap && i < t.length; i++) {
-        if (t[i] - t[i - 1] < normalLap * 0.5) { t.splice(i - 1, 1); removed++; if (firstBad == null) firstBad = i; i--; }
-      }
-      if (t.length && normalLap && t[0] < normalLap * 0.5 && o.LapDetails.length > 1) { t.shift(); removed++; if (firstBad == null) firstBad = 1; }
-      // Before the real crossing arrives, a false one just looks like an impossibly fast lap (7:55 against 9:10 laps).
-      // A lap over 12% faster than both the rider's previous lap and the field's normal lap is not taken as finished.
-      for (let i = 1; normalLap && i < t.length; i++) {
-        const lapT = t[i] - t[i - 1], prev = i > 1 ? t[i - 1] - t[i - 2] : t[0];
-        if (lapT < prev * 0.88 && lapT < normalLap * 0.88) { t.splice(i, 1); removed++; if (firstBad == null) firstBad = i + 1; i--; }
+      for (let guard = 0; normalLap && guard < 6; guard++) {
+        let i = -1;
+        for (let k = 1; k < t.length && i < 0; k++) {
+          const lapT = t[k] - t[k - 1], prev = k > 1 ? t[k - 1] - t[k - 2] : t[0];
+          if (lapT < normalLap * 0.5 || (lapT < prev * 0.88 && lapT < normalLap * 0.88) || (nearFront && lapT > normalLap * 1.6)) i = k;
+        }
+        if (i < 0) break;
+        const bad = offField(t[i - 1]) > offField(t[i]) ? i - 1 : i;
+        if (t.length > fieldCount(t[t.length - 1])) { t.splice(bad, 1); removed++; }
+        else {
+          const own = [];
+          for (let k = 0; k < t.length; k++) { const L = t[k] - (k ? t[k - 1] : 0); if (k !== bad && k !== bad + 1 && L > normalLap * 0.8 && L < normalLap * 1.2) own.push(L); }
+          const ref = median(own) || normalLap;
+          t[bad] = bad > 0 ? t[bad - 1] + ref : t[bad + 1] - ref;
+        }
+        if (firstBad == null || bad + 1 < firstBad) firstBad = bad + 1;
       }
       clean[o.Dossard] = { lt: t, removed, firstBad };
     }
@@ -1300,7 +1322,7 @@ async function refreshLive(id) {
       const inLap = cs.LapTime == null || rawStart == null ? null : rawStart + cs.LapTime - (lap > 1 ? (ltc[lap - 2] ?? NaN) : 0);
       // Checkpoint times recorded under the false lap numbers are dropped; timing records them again on the next pass.
       // Done once per glitch, so times recorded after the clean-up are kept.
-      const sig = cl.removed ? cl.firstBad + '/' + cl.removed + '/' + (row.LapDetails || []).length : null;
+      const sig = cl.firstBad != null ? cl.firstBad + '/' + cl.removed + '/' + (row.LapDetails || []).length : null;
       if (sig && (r.cleaned = r.cleaned || {})[x.bib] !== sig) {
         r.cleaned[x.bib] = sig;
         if (r.splits && r.splits[x.bib]) for (const k of Object.keys(r.splits[x.bib])) if (+k.split(':')[0] >= cl.firstBad) delete r.splits[x.bib][k];
@@ -1495,7 +1517,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 26;
+const APP_VERSION = 27;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
