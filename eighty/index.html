@@ -16,6 +16,7 @@
   --accent: #6d28d9; --danger: #b91c1c; --chip: #eef1f6; --ok: #15803d; --dnf: #c2410c;
   --watch-bg: #fde68a; --watch-ink: #713f12; --alert-bg: #fecaca; --alert-ink: #7f1d1d; --over: #dc2626;
   --loss: #ea580c; --loss-bg: #fdba74; --loss-ink: #7c2d12;
+  --lap: #2563eb; --lap-bg: #bfdbfe; --lap-ink: #0b1f4d;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -23,6 +24,7 @@
     --accent: #a78bfa; --danger: #f87171; --chip: #232731; --ok: #4ade80; --dnf: #fb923c;
     --watch-bg: #4a3b0a; --watch-ink: #fde68a; --alert-bg: #4c1414; --alert-ink: #fecaca; --over: #ef4444;
     --loss: #fb923c; --loss-bg: #5a2a0c; --loss-ink: #fed7aa;
+    --lap: #3b82f6; --lap-bg: #10244d; --lap-ink: #dbeafe;
   }
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
@@ -129,6 +131,14 @@ table.sl tr.pulled td { background: var(--chip); }
 table.sl tr.pulled td:not(:last-child) { opacity: .4; }
 table.sl tr.pulled .nm { text-decoration: line-through; }
 tr.pulled .pull-btn { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* Lapped riders pulse over every other colour so they stand out as the ones to look for. */
+@keyframes lappulse { 0%, 100% { background: var(--lap-bg); } 50% { background: var(--lap); } }
+table.sl tr.lapped td { animation: lappulse 1.2s ease-in-out infinite; color: var(--lap-ink); }
+table.sl tr.lapped .team, table.sl tr.lapped .pct, table.sl tr.lapped .uciid, table.sl tr.lapped .live { color: var(--lap-ink); }
+table.sl tr.lapped td.bib { box-shadow: inset 6px 0 0 var(--lap); }
+.lap-tag { display: inline-block; margin-top: 3px; font-size: 12px; font-weight: 900; padding: 2px 7px; border-radius: 6px;
+  background: var(--lap); color: #fff; }
+.live-note .lapped-note { color: var(--lap); font-weight: 800; }
 table.sl tr.out td:not(.res) { opacity: .4; }
 
 @media (max-width: 900px) {
@@ -207,7 +217,8 @@ table.sl tr.out td:not(.res) { opacity: .4; }
   </table>
   <p class="footer-note">Riders are sorted by live position from every timing point around the course. Tap <b>Leader through</b> each
     time the leader passes the 80% zone: riders not through yet are as far behind as the timer. Yellow: past 50% of the pull time.
-    Red: past 75%. PULL: past the pull time. Orange: losing more time than on their previous lap (crash or mechanical?).
+    Red: past 75%. PULL: past the pull time. Orange: losing more time than on their previous lap (crash or mechanical?). Pulsing blue: lapped, not through since your
+    previous Leader through tap, so look for them.
     <b>Pulled</b> only changes how a rider is shown.</p>
 </section>
 
@@ -474,6 +485,13 @@ function behindOf(r, bib) {
   const el = Date.now() - Date.parse(t.at);
   return el >= (res.gap || 0) ? { ms: el, from: 'timer' } : { ms: res.gap, from: 'timing' };
 }
+// Lapped: the leader has come through the zone again (timer restarted) and this rider still hasn't come through
+// since the previous pass, i.e. they are still on an earlier lap than the one the leader was finishing. They pulse
+// until they reach the line (they have then come past the zone) or are marked pulled.
+function lappedOf(r, bib) {
+  const t = r.timer, res = resOf(r, bib);
+  return !!(t && t.lap && t.passes > 1 && racing(r, bib) && res.lap < t.lap);
+}
 function riskOf(r, bib) {
   const b = behindOf(r, bib), cut = cutOf(r);
   return b && b.ms && cut ? level(b.ms / cut) : null;
@@ -574,7 +592,7 @@ function cutLineHtml(r) {
     <span class="key watch">Yellow +${fmtDur(cut * WATCH)}</span><span class="key alert">Red +${fmtDur(cut * ALERT)}</span>`;
 }
 
-function onWatch(r, bib) { return !!(riskOf(r, bib) || lossOf(r, bib)); }
+function onWatch(r, bib) { return !!(riskOf(r, bib) || lossOf(r, bib) || lappedOf(r, bib)); }
 function renderRace() {
   const r = races[currentId];
   if (!r) return renderHome();
@@ -611,12 +629,13 @@ function renderRace() {
 function outOfRace(r, bib) { const res = resOf(r, bib); return !!res && res.status !== 'OK'; }
 function rowClass(r, bib) {
   const res = resOf(r, bib), risk = riskOf(r, bib), loss = lossOf(r, bib);
-  return ['rider', risk === 'over' ? 'alert over' : risk, loss ? 'loss' : '', isPulled(r, bib) ? 'pulled' : '',
+  return ['rider', risk === 'over' ? 'alert over' : risk, loss ? 'loss' : '', lappedOf(r, bib) ? 'lapped' : '', isPulled(r, bib) ? 'pulled' : '',
     res && res.status !== 'OK' ? 'out' : ''].filter(Boolean).join(' ');
 }
 function lossHtml(r, bib) {
   const l = lossOf(r, bib);
-  return l ? `<span class="loss-tag">⚠ ${esc(l.why)}</span>` : '';
+  return (lappedOf(r, bib) ? '<span class="lap-tag">LAPPED · look for</span> ' : '')
+    + (l ? `<span class="loss-tag">⚠ ${esc(l.why)}</span>` : '');
 }
 function gapHtml(r, bib) {
   const b = behindOf(r, bib), cut = cutOf(r);
@@ -686,8 +705,11 @@ function leaderThrough() {
   lastPass = Date.now();
   const r = races[currentId], before = r.timer || null;
   // The lap the leader is finishing as they pass the zone, from live timing. Riders who complete that lap are through.
-  const lead = r.results && Object.values(r.results.byBib).find(b => b.pos === 1 && b.inRace);
-  r.timer = { at: new Date().toISOString(), passes: before ? before.passes + 1 : 1, lap: lead ? lead.lap : null };
+  // If timing shows the leader crossed the line within the last minute, the tap was late: use the lap just finished.
+  const R = r.results, lead = R && Object.values(R.byBib).find(b => b.pos === 1 && b.inRace);
+  let lap = lead ? lead.lap : null;
+  if (lead && lead.done && lead.lt && R.raceTime + (Date.now() - Date.parse(R.at)) - lead.lt[lead.done - 1] < 60000) lap = lead.done;
+  r.timer = { at: new Date().toISOString(), passes: before ? before.passes + 1 : 1, lap };
   saveRaces(); renderClock(); updateRows();
   toast(`Timer started: leader pass ${r.timer.passes}${r.timer.lap ? ` (lap ${r.timer.lap})` : ''}`, { id: r.id, timer: before });
 }
@@ -888,6 +910,8 @@ function liveNoteHtml(r) {
     if (n.alert || n.watch) parts.push(`${n.alert} red · ${n.watch} yellow`);
     if (n.loss) parts.push(`<span class="orange">${n.loss} losing time</span>`);
     if (n.pulled) parts.push(`${n.pulled} pulled`);
+    const lapped = orderedRiders(r).filter(x => lappedOf(r, x.bib)).map(x => '#' + x.bib);
+    if (lapped.length) parts.push(`<span class="lapped-note">Look for lapped: ${lapped.join(' ')}</span>`);
   }
   if (ls.error === 'offline') parts.push('offline, showing last results');
   else if (ls.error === 'error') parts.push('could not reach live timing');
@@ -963,7 +987,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 3;
+const APP_VERSION = 4;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
