@@ -953,13 +953,15 @@ function togglePulled(bib) {
 // There is no timing point at the 80% zone, so the official taps "Leader through" as the leader passes. The clock
 // then runs from that moment; it turns yellow at 50% of the pull time, red at 75%, and says PULL past the pull time.
 // Each new pass restarts it. The start is saved, so the clock survives closing the app.
-// True once every rider still racing (not pulled, not -80%/DNF/DNS) has passed the zone checkpoint on the lap of
-// the latest Leader through tap. Needs live timing and the lap of that tap.
+// True once every rider still racing (not pulled, not -80%/DNF/DNS) has reached the checkpoint after the zone
+// (14) on the lap of the latest Leader through tap: they are then past the zone and confirmed still racing, where a
+// rider last seen at checkpoint 13 may have been pulled. On a course without that checkpoint, crossing the line counts.
 function allThrough(r) {
   const t = r.timer;
   if (!t || !t.lap || !r.results) return false;
+  const after = zoneLoc(r) + 1;
   const on = r.riders.filter(x => racing(r, x.bib));
-  return on.length > 0 && on.every(x => pastZone(r, resOf(r, x.bib), t.lap));
+  return on.length > 0 && on.every(x => { const res = resOf(r, x.bib); return res.lap > t.lap || (res.lap === t.lap && res.loc >= after); });
 }
 function renderClock() {
   const r = races[currentId];
@@ -978,7 +980,7 @@ function renderClock() {
   if (allThrough(r)) {
     clock.className = 'clock';
     $('#clockT').textContent = `All through · lap ${t.lap}`;
-    $('#clockS').textContent = `Every rider still racing has passed checkpoint ${zoneLoc(r)} · waiting for the leader's next pass`;
+    $('#clockS').textContent = `Every rider still racing has reached checkpoint ${zoneLoc(r) + 1} · waiting for the leader's next pass`;
     return;
   }
   const el = Date.now() - Date.parse(t.at);
@@ -1326,7 +1328,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 17;
+const APP_VERSION = 18;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
