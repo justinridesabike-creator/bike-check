@@ -129,6 +129,9 @@ table.sl tr.over td.bib { box-shadow: inset 6px 0 0 var(--over); }
 table.sl tr.loss:not(.alert) td { background: var(--loss-bg); color: var(--loss-ink); }
 table.sl tr.loss:not(.alert) .team, table.sl tr.loss:not(.alert) .pct, table.sl tr.loss:not(.alert) .uciid { color: var(--loss-ink); }
 table.sl tr.loss td.bib { box-shadow: inset 6px 0 0 var(--loss); }
+.eta { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.eta.soon { color: var(--lap); font-weight: 800; }
+.eta.late { color: var(--over); font-weight: 800; }
 .loss-tag { display: inline-block; margin-top: 3px; font-size: 12px; font-weight: 800; padding: 2px 7px; border-radius: 6px;
   background: var(--loss); color: #fff; }
 .live-note .orange { color: var(--loss); font-weight: 700; }
@@ -229,7 +232,7 @@ table.sl tr.out td:not(.res) { opacity: .4; }
     as the timer; riders past it show their gap at checkpoint 13. <b>Live gap</b> follows timing round the course, with ▲ time lost or ▼ gained since checkpoint 13. Yellow: past 50% of the pull time.
     Red: past 75%. PULL: past the pull time. Orange: losing more time than on their previous lap (crash or mechanical?). Pulsing blue: lapped, not at checkpoint 13 since your
     previous Leader through tap, so look for them.
-    <b>Pulled</b> only changes how a rider is shown.</p>
+    Under each name: expected arrival at the 80% zone from the rider's earlier laps and current pace. <b>Pulled</b> only changes how a rider is shown.</p>
 </section>
 
 <div id="toast" class="toast hidden"><span id="toastMsg"></span><button id="toastUndo">Undo</button></div>
@@ -551,7 +554,7 @@ function riskOf(r, bib) {
 //   - the last lap was slower than the one before;
 //   - they reached their last timing point later into the lap than on the previous lap;
 //   - they are overdue at their next timing point compared with the previous lap;
-//   - they dropped 5 or more places since the end of their last lap.
+//   - they dropped 5 or more places since the end of their last lap and lost over 20 seconds doing it.
 // Time losses count when they exceed 20 seconds and 8% of the reference time.
 function lossLimit(ref) { return Math.max(20000, ref * 0.08); }
 function lossOf(r, bib) {
@@ -580,7 +583,11 @@ function lossOf(r, bib) {
     const loss = raceNow - res.lt[n - 2] - ref;
     if (loss > lossLimit(ref)) found.push({ ms: loss, why: `overdue ${fmtDur(loss)}` });
   }
-  if (res.rankAfter && res.pos - res.rankAfter >= 5) found.push({ ms: 0, why: `down ${res.pos - res.rankAfter} places` });
+  // Dropping places only counts with real time lost since the end of the last lap (not shuffling within a group).
+  if (res.rankAfter && res.pos - res.rankAfter >= 5 && res.done && R.leaderAt && R.leaderAt[res.done] != null && res.gap != null) {
+    const lost = res.gap - (res.lt[res.done - 1] - R.leaderAt[res.done]);
+    if (lost > 20000) found.push({ ms: lost, why: `down ${res.pos - res.rankAfter} places, ${fmtDur(lost)} lost` });
+  }
   if (!found.length) return null;
   return found.sort((a, b) => b.ms - a.ms)[0];
 }
@@ -664,7 +671,7 @@ function renderRace() {
       <td class="num hide-md">${esc(x.start)}${x.flag ? ` <span class="flag">${esc(x.flag)}</span>` : ''}</td>
       <td class="ctr hide-sm">${x.outfit ? `<span class="outfit">${esc(x.outfit)}</span>` : ''}</td>
       <td class="bib">${esc(x.bib)}</td>
-      <td><div class="nm">${esc(x.name)}</div><div class="team">${esc(x.team)}</div><span class="ltag">${lossHtml(r, x.bib)}</span></td>
+      <td><div class="nm">${esc(x.name)}</div><div class="team">${esc(x.team)}</div><span class="ltag">${lossHtml(r, x.bib)}</span><span class="etag">${etaHtml(r, x.bib)}</span></td>
       <td class="uciid hide-md">${esc(x.uciId)}</td>
       <td>${esc(x.nat)}</td>
       <td class="num hide-md">${esc(x.yob)}</td>
@@ -684,6 +691,55 @@ function rowClass(r, bib) {
   return ['rider', risk === 'over' ? 'alert over' : risk, loss ? 'loss' : '', lappedOf(r, bib) ? 'lapped' : '', isPulled(r, bib) ? 'pulled' : '',
     res && res.status !== 'OK' ? 'out' : ''].filter(Boolean).join(' ');
 }
+/* ---------- Expected arrival at the 80% zone ---------- */
+function median(a) { const v = a.filter(x => x != null && x > 0).sort((x, y) => x - y); return v.length ? v[Math.floor((v.length - 1) / 2)] : null; }
+// Expected race time at which the rider reaches the zone checkpoint next:
+// - reference: the rider's own time into the lap at checkpoint 13 on earlier laps (lap 1 only if nothing else), else
+//   their earlier lap times scaled by where checkpoint 13 sits in the lap for the rest of the field;
+// - pace: how they are doing this lap at their latest checkpoint compared with the same checkpoint on earlier laps.
+// Once past checkpoint 13 on this lap, the estimate is for the next lap.
+function zoneEta(r, bib) {
+  if (!racing(r, bib) || !r.results || r.results.status !== 'InProgress') return null;
+  const res = resOf(r, bib), R = r.results, Z = zoneLoc(r), h = (r.splits && r.splits[bib]) || {};
+  if (!res.lt) return null;
+  const n = res.lap, lapStart = n > 1 ? res.lt[n - 2] : 0;
+  if (lapStart == null) return null;
+  const lapT = k => res.lt[k - 1] - (k > 1 ? res.lt[k - 2] : 0);
+  const earlier = (vals) => { const later = vals.filter(v => v.k > 1); return median((later.length ? later : vals).map(v => v.t)); };
+  const at = loc => earlier(Object.keys(h).filter(k => k.endsWith(':' + loc) && +k.split(':')[0] < n).map(k => ({ k: +k.split(':')[0], t: h[k] })));
+  const laps = []; for (let k = 1; k <= res.done; k++) laps.push({ k, t: lapT(k) });
+  const refLap = earlier(laps);
+  // Where checkpoint 13 sits in a lap, as a share of the lap time, from every rider seen at it.
+  let ref13 = at(Z);
+  if (ref13 == null && refLap) {
+    const shares = [];
+    for (const [b, hh] of Object.entries(r.splits || {})) {
+      const rr = R.byBib[b]; if (!rr || !rr.lt || rr.lt.length < 2) continue;
+      // That rider's typical lap (laps after the first).
+      const typical = median(rr.lt.slice(1).map((t, i) => t - rr.lt[i]));
+      for (const [k, t] of Object.entries(hh)) if (+k.split(':')[1] === Z && +k.split(':')[0] > 1 && typical) shares.push(t / typical);
+    }
+    const share = median(shares);
+    if (share) ref13 = refLap * share;
+  }
+  if (ref13 == null) return null;
+  // Current pace against earlier laps at the latest checkpoint (kept within sensible bounds).
+  let pace = 1;
+  if (res.loc > 0 && res.inLap != null) { const ref = at(res.loc); if (ref) pace = Math.min(1.6, Math.max(0.8, res.inLap / ref)); }
+  if (res.loc < Z) return { t: lapStart + ref13 * pace, lap: n };
+  if (!refLap || (R.maxLaps && n >= R.maxLaps)) return null; // past the zone on the last lap: no more passes
+  return { t: lapStart + refLap * pace + ref13, lap: n + 1 };
+}
+function etaHtml(r, bib) {
+  const e = zoneEta(r, bib);
+  if (!e) return '';
+  const R = r.results, raceNow = R.raceTime + (Date.now() - Date.parse(R.at));
+  const wall = new Date(Date.parse(R.at) + (e.t - R.raceTime)).toISOString();
+  const left = e.t - raceNow;
+  const when = left >= 0 ? `in ${fmtDur(left)}` : `due ${fmtDur(-left)} ago`;
+  return `<span class="eta ${left < 0 ? 'late' : left < 60000 ? 'soon' : ''}">80% zone lap ${e.lap} ≈ ${fmtTime(wall, true)} · ${when}</span>`;
+}
+
 function lossHtml(r, bib) {
   const l = lossOf(r, bib);
   return (lappedOf(r, bib) ? '<span class="lap-tag">LAPPED · look for</span> ' : '')
@@ -725,6 +781,8 @@ function updateRows() {
     const g = tr.querySelector('td.gap'), lg = tr.querySelector('td.live-gap'), l = tr.querySelector('.ltag');
     if (g.innerHTML !== gap) g.innerHTML = gap;
     if (lg.innerHTML !== live) lg.innerHTML = live;
+    const e = tr.querySelector('.etag'), eta = etaHtml(r, bib);
+    if (e.innerHTML !== eta) e.innerHTML = eta;
     if (l.innerHTML !== loss) l.innerHTML = loss;
   }
 }
