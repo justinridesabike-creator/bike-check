@@ -637,6 +637,15 @@ function exportCsv() {
 }
 
 /* ---------- Live results (ChronoRace) ---------- */
+// Live updates can reorder rows; wait until 2s after the last tap so a row never moves under the user's finger.
+let renderTimer = null;
+function renderSoon() {
+  clearTimeout(renderTimer);
+  const wait = 2000 - (Date.now() - (window.lastTapAt || 0));
+  if (wait > 0) renderTimer = setTimeout(renderSoon, wait);
+  else renderRace();
+}
+document.addEventListener('pointerdown', () => { window.lastTapAt = Date.now(); }, true);
 // The UCI live timing site (live.ucimtbworldseries.com) embeds ChronoRace. Its JSON feeds allow cross-origin reads:
 //   event menu:  api/results/uci/dh/cms/<event>        e.g. 20261002_mtb (the event's first day)
 //   per race:    api/results/xco/<event>/overview/<key> and /registration/<key>   (key e.g. XCCWE, ME)
@@ -709,16 +718,18 @@ async function refreshLive(id) {
       let dos = x.uciId && byUci[x.uciId];
       if (!dos) { const m = ov.OverviewData.find(o => o.Dossard % 1000 === +x.bib); dos = m && m.Dossard; }
       const row = dos && byDossard[dos];
-      if (row) byBib[x.bib] = { pos: row.Pos, status: row.Status, inRace: !!row.InRace };
+      if (row) byBib[x.bib] = { pos: row.Pos, status: row.Status, inRace: !!row.InRace, lap: (row.CurrentSituation && row.CurrentSituation.Lap) || (row.LapDetails || []).length };
     }
-    r.results = { byBib, status: ov.Status, curLap: ov.CurLap, maxLaps: ov.MaxLaps, at: new Date().toISOString() };
+    // Started once any rider has crossed a timing point (finish line or intermediate time check).
+    const started = ov.OverviewData.some(o => (o.LapDetails || []).length > 0 || (o.CurrentSituation && o.Pos > 0));
+    r.results = { byBib, status: ov.Status, started, curLap: ov.CurLap, maxLaps: ov.MaxLaps, at: new Date().toISOString() };
     applyAutoStatus(r);
     saveRaces();
   } catch (e) {
     ls.error = navigator.onLine === false ? 'offline' : 'error';
   } finally {
     ls.busy = false;
-    if (currentId === id) renderRace();
+    if (currentId === id) renderSoon();
   }
 }
 
@@ -745,10 +756,10 @@ function applyAutoStatus(r) {
   if (added.length && races[currentId] === r) toast('Live timing marked ' + added.join(', '));
 }
 
-// From the leader's last lap on (and once finished), list riders in result order instead of start order.
+// Once the race is under way, list riders by live position (updated at every timing point), then by result.
 function sortedByResult(r) {
   const res = r.results;
-  return !!res && (res.status === 'Finished' || (res.maxLaps > 0 && res.curLap >= res.maxLaps));
+  return !!res && (res.status === 'Finished' || !!res.started);
 }
 function orderedRiders(r) {
   if (!sortedByResult(r)) return r.riders;
@@ -765,7 +776,7 @@ function resultCell(r, bib) {
   const res = r.results && r.results.byBib[bib];
   if (!res) return '<td class="res"></td>';
   const label = resultLabel(res);
-  if (res.status === 'OK') return `<td class="res">${esc(label)}${res.inRace ? '<span class="live">LIVE</span>' : ''}</td>`;
+  if (res.status === 'OK') return `<td class="res">${esc(label)}${res.inRace ? `<span class="live">LAP ${res.lap}</span>` : ''}</td>`;
   const cls = res.status === 'DNF' ? 'dnf' : res.status === 'R80' ? '' : 'bad';
   return `<td class="res"><span class="rs ${cls}">${esc(label)}</span></td>`;
 }
@@ -778,7 +789,7 @@ function liveNoteHtml(r) {
     if (res.status === 'Finished') parts.push('<b>Finished</b>');
     else if (res.maxLaps) parts.push(`<b>Lap ${res.curLap} / ${res.maxLaps}</b>`);
     parts.push('updated ' + fmtTime(res.at));
-    if (sortedByResult(r)) parts.push('sorted by result');
+    if (sortedByResult(r)) parts.push(r.results.status === 'Finished' ? 'sorted by result' : 'sorted by live position');
   }
   if (ls.error === 'offline') parts.push('offline, showing last results');
   else if (ls.error === 'error') parts.push('could not reach live timing');
@@ -865,7 +876,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 11;
+const APP_VERSION = 12;
 $('#appVersion').textContent = `Bike Check version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
