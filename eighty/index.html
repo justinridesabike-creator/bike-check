@@ -544,6 +544,8 @@ function zoneTime(r, bib, lap) {
   const res = resOf(r, bib), h = r.splits && r.splits[bib];
   const inLap = h && h[lap + ':' + zoneLoc(r)];
   if (inLap == null || !res) return null;
+  // Only once timing shows the rider past checkpoint 13 on that lap (a saved time can't be from the future).
+  if (!pastZone(r, res, lap)) return null;
   // Checkpoint 13 is near the end of the lap: a time less than half a normal lap in is a timing glitch.
   const normal = r.results && r.results.normalLap;
   if (normal && inLap < normal * 0.5) return null;
@@ -1344,6 +1346,17 @@ async function refreshLive(id) {
         h[lap + ':' + cs.LapLocation] = inLap;
       }
     }
+    // Throw out saved checkpoint times that can't be right (e.g. recorded during a timing glitch): each checkpoint's
+    // time into the lap is compared with the median of every rider's at that checkpoint, and anything under 60% or
+    // over 160% of it is dropped. Runs on every refresh, so it also cleans records saved by older versions.
+    const byLoc = {};
+    for (const h of Object.values(r.splits || {})) for (const [k, v] of Object.entries(h)) (byLoc[k.split(':')[1]] = byLoc[k.split(':')[1]] || []).push(v);
+    const locMed = {};
+    for (const [loc, vals] of Object.entries(byLoc)) if (vals.length >= 5) locMed[loc] = median(vals);
+    for (const h of Object.values(r.splits || {})) for (const [k, v] of Object.entries(h)) {
+      const m = locMed[k.split(':')[1]];
+      if (m && (v < m * 0.6 || v > m * 1.6)) delete h[k];
+    }
     // The leader's first lap: the fastest time to the end of lap 1 across the field.
     const leaderLap1 = leaderAt[1] || null;
     // Started once any rider has crossed a timing point (finish line or intermediate time check).
@@ -1517,7 +1530,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 27;
+const APP_VERSION = 28;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
