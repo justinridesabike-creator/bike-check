@@ -1,0 +1,1083 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>80% Zone</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="80% Zone">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+:root {
+  --bg: #f4f5f7; --card: #ffffff; --ink: #16181d; --muted: #6b7280; --line: #e3e5ea;
+  --accent: #6d28d9; --dnf: #c2410c; --pull: #6d28d9; --pull-bg: #f1eafd; --over: #b91c1c; --near: #b45309;
+  --near-bg: #fef3c7; --danger: #b91c1c; --chip: #eef1f6; --ok: #15803d;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115; --card: #181b21; --ink: #eceef2; --muted: #9aa1ad; --line: #2a2e36;
+    --accent: #a78bfa; --dnf: #fb923c; --pull: #a78bfa; --pull-bg: #251c3a; --over: #f87171; --near: #fbbf24;
+    --near-bg: #3a2e10; --danger: #f87171; --chip: #232731; --ok: #4ade80;
+  }
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+html, body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+button { font: inherit; color: inherit; }
+.hidden { display: none !important; }
+
+/* Top bar */
+header.bar { position: sticky; top: 0; z-index: 10; background: var(--card); border-bottom: 1px solid var(--line);
+  padding: 12px 16px; display: flex; align-items: center; gap: 12px; }
+header.bar h1 { font-size: 20px; margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn { border: 1px solid var(--line); background: var(--card); border-radius: 10px; padding: 10px 14px; font-weight: 600; cursor: pointer; }
+.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn.danger { color: var(--danger); }
+.btn.small { padding: 6px 10px; font-size: 14px; }
+
+/* Home */
+main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+.empty { text-align: center; color: var(--muted); padding: 60px 16px; }
+.empty p { max-width: 460px; margin: 8px auto; }
+.group-head { display: flex; align-items: baseline; gap: 10px; margin: 22px 0 10px; }
+.group-head:first-child { margin-top: 4px; }
+.group-head h2 { margin: 0; font-size: 22px; }
+.group-head span { color: var(--muted); font-size: 14px; }
+.races { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.race-card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; cursor: pointer; }
+.race-card .cat { font-size: 20px; font-weight: 700; }
+.race-card .meta { color: var(--muted); font-size: 14px; margin-top: 2px; }
+.race-card .count { margin-top: 10px; font-size: 14px; font-weight: 600; }
+.race-card .split { color: var(--muted); font-weight: 500; }
+
+/* Race view */
+.race-head { background: var(--card); border-bottom: 1px solid var(--line); padding: 10px 16px 12px; position: sticky; top: 61px; z-index: 9; }
+.race-head .row1 { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.race-head .bigcount { font-size: 28px; font-weight: 800; }
+.race-head .sub { color: var(--muted); font-size: 14px; }
+.cut-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; font-size: 15px; }
+.cut-line .cut { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--over); }
+.cut-line .why { color: var(--muted); font-size: 13px; }
+.live-note { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.live-note b { color: var(--ink); }
+.live-note .warn { color: var(--near); font-weight: 700; }
+.tools { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+.tools input[type=search] { flex: 1; min-width: 160px; font: inherit; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg button { border: 0; background: var(--card); padding: 10px 14px; font-weight: 600; cursor: pointer; }
+.seg button.on { background: var(--accent); color: #fff; }
+
+table.sl { width: 100%; border-collapse: collapse; background: var(--card); }
+table.sl th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+  padding: 8px 6px; border-bottom: 2px solid var(--line); font-weight: 700; background: var(--card); }
+table.sl td { padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+table.sl tr.rider { cursor: pointer; user-select: none; -webkit-user-select: none; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.ctr, th.ctr { text-align: center; }
+td.bib { font-size: 22px; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+.nm { font-weight: 700; }
+.team { font-size: 13px; color: var(--muted); }
+.outfit { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 6px; border-radius: 6px; background: var(--chip); }
+.flag { font-size: 12px; color: var(--muted); }
+.uciid { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; }
+
+td.res { text-align: center; font-weight: 800; font-size: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.res .rs { display: inline-block; font-size: 12px; font-weight: 800; padding: 2px 6px; border-radius: 6px; background: var(--chip); }
+td.res .rs.bad { background: var(--danger); color: #fff; }
+td.res .rs.dnf { background: var(--dnf); color: #fff; }
+td.res .rs.r80 { background: var(--pull); color: #fff; }
+td.res .live { display: block; font-size: 10px; font-weight: 700; color: var(--ok); }
+td.gap { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 17px; font-weight: 600; }
+td.gap .pct { display: block; font-size: 11px; font-weight: 700; color: var(--muted); }
+tr.near td.gap { color: var(--near); font-weight: 800; }
+tr.near { background: var(--near-bg); }
+tr.over td.gap { color: var(--over); font-weight: 800; }
+tr.over td.gap .pct { color: var(--over); }
+tr.over td.bib { box-shadow: inset 5px 0 0 var(--over); }
+
+.pullbox { width: 64px; height: 44px; border-radius: 12px; border: 2px solid var(--line); display: inline-flex;
+  align-items: center; justify-content: center; font-size: 17px; font-weight: 900; color: transparent; }
+tr.over .pullbox { border-color: var(--over); color: var(--over); }
+tr.pulled { background: var(--pull-bg); }
+tr.pulled .pullbox { background: var(--pull); border-color: var(--pull); color: #fff; }
+.when { font-size: 11px; color: var(--muted); display: block; white-space: nowrap; text-align: center; margin-top: 2px; min-height: 13px; }
+.mini { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 8px; min-height: 32px;
+  font-size: 12px; font-weight: 700; cursor: pointer; margin-top: 4px; }
+.mini[disabled] { opacity: .3; }
+.place { font-size: 12px; font-weight: 800; color: var(--pull); display: block; text-align: center; }
+.tmis { display: inline-block; font-size: 11px; font-weight: 800; padding: 1px 6px; border-radius: 6px; background: var(--near-bg);
+  color: var(--near); margin-top: 3px; }
+
+.dns-btn { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 8px 10px;
+  font-size: 13px; font-weight: 700; color: var(--muted); cursor: pointer; }
+table.sl tr.rider.out { background: var(--chip); }
+table.sl tr.rider.out td:not(.dns-cell) { opacity: .4; }
+table.sl tr.rider.out .nm { text-decoration: line-through; }
+tr.dns .dns-btn[data-dns] { background: var(--danger); border-color: var(--danger); color: #fff; }
+tr.dnf .dns-btn[data-dnf] { background: var(--dnf); border-color: var(--dnf); color: #fff; }
+table.sl tr.rider.out td.res { opacity: 1; }
+.dns-cell { white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .hide-md { display: none; }
+}
+@media (max-width: 700px) {
+  .hide-sm { display: none; }
+}
+.toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  background: #16181d; color: #fff; padding: 12px 16px; border-radius: 12px; display: flex; gap: 14px; align-items: center;
+  box-shadow: 0 6px 24px rgba(0,0,0,.25); z-index: 50; max-width: calc(100% - 32px); }
+.toast button { background: none; border: 0; color: #c4b5fd; font-weight: 700; cursor: pointer; padding: 4px; }
+.footer-note { color: var(--muted); font-size: 13px; text-align: center; margin: 24px 16px; }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <button id="backBtn" class="btn small hidden" aria-label="Back to races">‹ Races</button>
+  <h1 id="title">80% Zone</h1>
+  <button id="importBtn" class="btn primary">Import start list</button>
+  <input id="fileInput" type="file" accept="application/pdf,.pdf" multiple class="hidden">
+</header>
+
+<!-- Home: list of imported races -->
+<main id="home">
+  <div id="emptyState" class="empty">
+    <h2>No start lists yet</h2>
+    <p>Tap <b>Import start list</b> and pick one or more UCI start list PDFs from Files.</p>
+    <p>Everything is stored on this iPad and works without a connection.</p>
+  </div>
+  <div id="raceList"></div>
+  <p class="footer-note" id="appVersion"></p>
+</main>
+
+<!-- Race screen -->
+<section id="raceView" class="hidden">
+  <div class="race-head">
+    <div class="row1">
+      <span class="bigcount" id="rvCount">0 pulled</span>
+      <span class="sub" id="rvSub"></span>
+    </div>
+    <div class="cut-line" id="cutLine"></div>
+    <div class="live-note" id="liveNote"></div>
+    <div class="tools">
+      <input id="search" type="search" placeholder="Bib, name, team or nation" autocomplete="off" inputmode="search">
+      <div class="seg" id="filterSeg">
+        <button data-f="all" class="on">All</button>
+        <button data-f="near">Near cut</button>
+        <button data-f="pulled">Pulled</button>
+      </div>
+      <button id="moreBtn" class="btn small">More…</button>
+    </div>
+    <div id="moreTools" class="tools hidden">
+      <button id="exportBtn" class="btn small">Export CSV</button>
+      <button id="resetBtn" class="btn small danger">Clear all pulls, DNS &amp; DNF</button>
+      <button id="deleteBtn" class="btn small danger">Remove this race</button>
+    </div>
+  </div>
+  <table class="sl">
+    <thead>
+      <tr>
+        <th class="num hide-md">Start</th>
+        <th class="ctr hide-sm">Outfit</th>
+        <th class="num">Nr</th>
+        <th>Name / UCI MTB Team</th>
+        <th class="hide-md">UCI ID</th>
+        <th>NAT</th>
+        <th class="num hide-md">YOB</th>
+        <th class="num hide-sm">WCS</th>
+        <th class="num hide-sm">UCI</th>
+        <th class="ctr">Pos</th>
+        <th class="num">Gap</th>
+        <th class="ctr">DNS / DNF</th>
+        <th class="ctr">Pulled</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p class="footer-note">Tap a rider to pull them at the 80% zone. Laps completed come from live timing; tap the laps button to correct them.
+    Pulled riders are ranked by laps completed, then in the order they were pulled. Use ▲ ▼ in the Pulled list to fix the order.</p>
+</section>
+
+<div id="toast" class="toast hidden"><span id="toastMsg"></span><button id="toastUndo">Undo</button></div>
+
+<script src="vendor/pdf.min.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+
+/* ---------- Storage ---------- */
+const STORE_KEY = 'pull80.races.v1';
+const MARKS = ['pulled', 'dns', 'dnf', 'auto', 'autoDismissed'];
+function loadRaces() {
+  try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) { return {}; }
+}
+function saveRaces() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(races)); }
+  catch (e) { alert('Could not save on this device: ' + e.message); }
+}
+let races = loadRaces();
+for (const r of Object.values(races)) for (const k of MARKS) r[k] = r[k] || {};
+
+/* ---------- PDF parsing (shared with Bike Check) ---------- */
+// UCI / ChronoRace start lists: each rider is a "name line" (start, outfit, bib, NAME, UCI ID, NAT, YOB, WCS, UCI)
+// with the team on a second line directly below in the name column. Names are drawn several times on top of
+// each other for a bold effect, and columns butt together with no spaces, so we place every text item into a
+// column by its x position rather than reading the text in order.
+
+function collapseRepeat(s) {
+  s = s.replace(/\s+/g, ' ').trim();
+  // Only names are overdrawn; never collapse numbers like bib 11 or 444.
+  const m = s.match(/^(.{3,}?)\1+$/);
+  return m && /[A-Za-z]/.test(m[1]) ? m[1].trim() : s;
+}
+
+async function extractItems(pdf) {
+  const pages = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const vp = page.getViewport({ scale: 1 });
+    const tc = await page.getTextContent();
+    const seen = new Set();
+    const items = [];
+    for (const it of tc.items) {
+      const str = (it.str || '').trim();
+      if (!str) continue;
+      const t = pdfjsLib.Util.transform(vp.transform, it.transform);
+      const x = t[4], y = t[5];
+      const key = str + '|' + x.toFixed(0) + '|' + y.toFixed(0);
+      if (seen.has(key)) continue; // overdrawn duplicate
+      seen.add(key);
+      items.push({ str, x, y, w: it.width });
+    }
+    pages.push({ items, width: vp.width, height: vp.height });
+  }
+  return pages;
+}
+
+function findColumns(items) {
+  // Locate the header row and derive column boundaries from it.
+  const find = label => items.find(i => i.str === label);
+  const start = find('Start'), nr = find('Nr'), uciId = find('UCI ID');
+  if (!start || !nr || !uciId) return null;
+  const sameLine = i => i && Math.abs(i.y - start.y) < 3;
+  const outfit = items.find(i => i.str === 'Outfit' && sameLine(i));
+  const name = items.find(i => i.str.startsWith('Name') && sameLine(i));
+  const nat = items.find(i => i.str === 'NAT' && sameLine(i));
+  const yob = items.find(i => i.str === 'YOB' && sameLine(i));
+  const wcs = items.find(i => /^(WCS|WC)$/.test(i.str) && sameLine(i));
+  const uci = items.find(i => i.str === 'UCI' && sameLine(i));
+  if (!name || !nat || !yob || !uci) return null;
+  return {
+    headerY: start.y,
+    // left edge of each column; numeric columns are right-aligned so their boundaries sit a little left of the header.
+    bounds: [
+      ['flag', -Infinity],
+      ['start', start.x - 12],
+      ['outfit', outfit ? outfit.x - 2 : start.x + 25],
+      ['bib', nr.x - 14],
+      ['name', name.x - 1],
+      ['uciId', uciId.x - 3],
+      ['nat', nat.x - 6],
+      ['yob', yob.x - 3],
+      ['wcs', wcs ? wcs.x - 12 : yob.x + 30],
+      ['uci', uci.x - 6],
+    ],
+  };
+}
+
+function colFor(x, cols) {
+  let c = cols.bounds[0][0];
+  for (const [name, left] of cols.bounds) if (x >= left) c = name;
+  return c;
+}
+
+function groupLines(items) {
+  const sorted = [...items].sort((a, b) => a.y - b.y || a.x - b.x);
+  const lines = [];
+  for (const it of sorted) {
+    const last = lines[lines.length - 1];
+    if (last && Math.abs(last.y - it.y) < 2.5) last.items.push(it);
+    else lines.push({ y: it.y, items: [it] });
+  }
+  return lines;
+}
+
+function parseMeta(items) {
+  const all = items.map(i => collapseRepeat(i.str));
+  const meta = {};
+  for (const s of all) {
+    let m;
+    if (!meta.startTime && (m = s.match(/Start Time:\s*(\d{1,2}:\d{2})/i))) meta.startTime = m[1];
+    if (!meta.date && (m = s.match(/^(MON|TUE|WED|THU|FRI|SAT|SUN)\s+\d{1,2}\s+[A-Z]{3}\s+\d{4}$/i))) meta.date = s;
+    if (!meta.category && /^(Men|Women)\b/i.test(s) && s.length < 40) meta.category = s;
+    if (!meta.discipline && /CROSS-COUNTRY|DOWNHILL|ENDURO|MARATHON|SHORT TRACK|ELIMINATOR/i.test(s) && s.length < 60) meta.discipline = s;
+  }
+  return meta;
+}
+
+function parsePages(pages) {
+  const riders = [];
+  let meta = {};
+  for (const pg of pages) {
+    const pm = parseMeta(pg.items);
+    meta = { ...pm, ...meta };
+    const cols = findColumns(pg.items);
+    if (!cols) continue;
+    const body = pg.items.filter(i => i.y > cols.headerY + 3 && !/^(Report created|Timing and results|Page \d)/.test(i.str));
+    const lines = groupLines(body);
+    let prev = null;
+    for (const ln of lines) {
+      const cells = {};
+      for (const it of ln.items.sort((a, b) => a.x - b.x)) {
+        const c = colFor(it.x, cols);
+        const s = collapseRepeat(it.str);
+        cells[c] = cells[c] ? cells[c] + ' ' + s : s;
+      }
+      const isRider = /^\d+$/.test(cells.bib || '') && (/^\d+$/.test(cells.start || '') || /^\d{11}$/.test(cells.uciId || ''));
+      if (isRider) {
+        prev = {
+          start: cells.start || '',
+          flag: cells.flag || '',
+          outfit: cells.outfit || '',
+          bib: cells.bib,
+          name: cells.name || '',
+          team: '',
+          uciId: cells.uciId || '',
+          nat: cells.nat || '',
+          yob: cells.yob || '',
+          wcs: cells.wcs || '',
+          uci: cells.uci || '',
+          _y: ln.y,
+        };
+        riders.push(prev);
+      } else if (prev && cells.name && Object.keys(cells).length === 1 && ln.y - prev._y < 12 && !prev.team) {
+        prev.team = cells.name;
+      } else {
+        prev = null;
+      }
+    }
+  }
+  riders.forEach(r => delete r._y);
+  return { meta, riders };
+}
+
+async function importFile(file) {
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const pages = await extractItems(pdf);
+  const { meta, riders } = parsePages(pages);
+  if (!riders.length) throw new Error('No riders found in ' + file.name + '. Is this a UCI start list PDF?');
+  const id = [meta.date, meta.discipline, meta.category, meta.startTime].filter(Boolean).join(' | ') || file.name;
+  const existing = races[id];
+  // Re-importing a revised start list keeps the pulls, DNS and DNF recorded against each bib.
+  const keep = {};
+  for (const k of MARKS) keep[k] = (existing && existing[k]) || {};
+  if (existing) Object.assign(keep, { cutOverride: existing.cutOverride, live: existing.live, results: existing.results });
+  races[id] = {
+    id, meta, riders, ...keep,
+    fileName: file.name,
+    importedAt: new Date().toISOString(),
+  };
+  saveRaces();
+  return { id, count: riders.length, updated: !!existing };
+}
+
+/* ---------- Race helpers ---------- */
+const $ = s => document.querySelector(s);
+let currentId = null;
+const autoOpened = new Set();
+let filter = 'all';
+
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+const STATUS = { dns: 'DNS', dnf: 'DNF' };
+function isDns(r, bib) { return !!r.dns[bib]; }
+function isDnf(r, bib) { return !!r.dnf[bib]; }
+function pullOf(r, bib) { return r.pulled[bib] || null; }
+function statusOf(r, bib) { return isDns(r, bib) ? 'dns' : isDnf(r, bib) ? 'dnf' : null; }
+function resOf(r, bib) { return r.results && r.results.byBib[bib] || null; }
+
+// Pulled riders rank behind everyone still racing: most laps completed first, then in the order they were pulled.
+function pullOrder(r) {
+  return r.riders.filter(x => pullOf(r, x.bib)).sort((a, b) => {
+    const pa = pullOf(r, a.bib), pb = pullOf(r, b.bib);
+    return (pb.laps ?? -1) - (pa.laps ?? -1) || (pa.at < pb.at ? -1 : pa.at > pb.at ? 1 : 0);
+  });
+}
+// Projected overall place of each pulled rider: after every rider who is still racing or finished.
+function pullPlaces(r) {
+  const order = pullOrder(r);
+  const ahead = r.riders.filter(x => !pullOf(r, x.bib) && !statusOf(r, x.bib)).length;
+  const places = {};
+  order.forEach((x, i) => { places[x.bib] = { place: ahead + i + 1, n: i + 1 }; });
+  return places;
+}
+function counts(r) {
+  const c = { pulled: 0, dns: 0, dnf: 0, timingR80: 0, mismatch: 0 };
+  for (const x of r.riders) {
+    if (pullOf(r, x.bib)) c.pulled++;
+    if (isDns(r, x.bib)) c.dns++;
+    if (isDnf(r, x.bib)) c.dnf++;
+    const res = resOf(r, x.bib);
+    if (res && res.status === 'R80') c.timingR80++;
+    if (mismatch(r, x.bib)) c.mismatch++;
+  }
+  return c;
+}
+// Timing and the app disagree about a pull (the timing team usually enters pulls a little after the radio call).
+function mismatch(r, bib) {
+  const res = resOf(r, bib), p = pullOf(r, bib);
+  if (!res) return null;
+  if (res.status === 'R80' && !p) return 'Timing: -80%';
+  if (p && res.status === 'OK' && !res.inRace && r.results.status === 'Finished') return 'Timing: finished';
+  return null;
+}
+function splitText(c) {
+  return [c.dnf ? `${c.dnf} DNF` : '', c.dns ? `${c.dns} DNS` : ''].filter(Boolean).join(' · ');
+}
+
+// Short discipline code from the start list header, e.g. "CROSS-COUNTRY SHORT TRACK" -> XCC.
+function discCode(r) {
+  const d = (r.meta.discipline || '').toUpperCase();
+  if (/SHORT TRACK/.test(d)) return 'XCC';
+  if (/ELIMINATOR/.test(d)) return 'XCE';
+  if (/MARATHON/.test(d)) return 'XCM';
+  if (/DOWNHILL/.test(d)) return 'DHI';
+  if (/CROSS-COUNTRY|OLYMPIC/.test(d)) return 'XCO';
+  return '';
+}
+function raceTitle(r) { return [discCode(r), r.meta.category || r.fileName].filter(Boolean).join(' '); }
+function raceSub(r) {
+  return [r.meta.discipline, r.meta.date, r.meta.startTime && 'Start ' + r.meta.startTime].filter(Boolean).join(' · ');
+}
+function sortKey(r) {
+  const d = Date.parse((r.meta.date || '').replace(/^\w+\s+/, '')) || 0;
+  return d + ' ' + (r.meta.startTime || '').padStart(5, '0');
+}
+// Start time from the start list ("FRI 2 OCT 2026" + "12:35"), read in the iPad's local time zone.
+const MONTHS = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
+function startDate(r) {
+  const d = (r.meta.date || '').match(/(\d{1,2})\s+([A-Z]{3})\s+(\d{4})/i);
+  const t = (r.meta.startTime || '').match(/(\d{1,2}):(\d{2})/);
+  if (!d || !t || !(d[2].toUpperCase() in MONTHS)) return null;
+  return new Date(+d[3], MONTHS[d[2].toUpperCase()], +d[1], +t[1], +t[2]);
+}
+function riderLabel(r, bib) {
+  const x = r.riders.find(x => x.bib === bib);
+  return `#${bib} ${x ? x.name : ''}`;
+}
+function fmtTime(iso, secs) {
+  return new Date(iso).toLocaleTimeString([], secs ? { hour: 'numeric', minute: '2-digit', second: '2-digit' } : { hour: 'numeric', minute: '2-digit' });
+}
+// Milliseconds as m:ss (or h:mm:ss).
+function fmtDur(ms) {
+  if (ms == null || isNaN(ms)) return '';
+  const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, ss = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+function parseDur(s) {
+  const m = String(s).trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/) || String(s).trim().match(/^()(\d+)()$/);
+  if (!m) return null;
+  return ((+m[1] || 0) * 3600 + (+m[2]) * 60 + (+m[3] || 0)) * 1000;
+}
+
+/* ---------- The 80% cut ---------- */
+// Default cut: 80% of the race leader's first lap time. A rider whose gap to the leader is beyond the cut is due to be
+// pulled at the 80% zone. When the panel announces a different cut, "Change" next to the cut sets it by hand.
+function autoCut(r) {
+  const l1 = r.results && r.results.leaderLap1;
+  return l1 ? Math.round(l1 * 0.8) : null;
+}
+function cutOf(r) { return r.cutOverride || autoCut(r); }
+const NEAR = 0.85; // "Near cut" from 85% of the cut
+function riskOf(r, bib) {
+  const res = resOf(r, bib), cut = cutOf(r);
+  if (!res || !cut || res.gap == null || !res.inRace || res.status !== 'OK') return null;
+  if (pullOf(r, bib) || statusOf(r, bib)) return null;
+  return res.gap > cut ? 'over' : res.gap >= cut * NEAR ? 'near' : null;
+}
+
+/* ---------- Home ---------- */
+function renderHome() {
+  currentId = null;
+  $('#title').textContent = '80% Zone';
+  $('#backBtn').classList.add('hidden');
+  $('#home').classList.remove('hidden');
+  $('#raceView').classList.add('hidden');
+  const list = Object.values(races).sort((a, b) => sortKey(a) < sortKey(b) ? -1 : 1);
+  $('#emptyState').classList.toggle('hidden', list.length > 0);
+  const card = r => {
+    const c = counts(r), split = splitText(c);
+    return `<div class="race-card" data-id="${esc(r.id)}">
+      <div class="cat">${esc(raceTitle(r))}</div>
+      <div class="meta">${esc(r.meta.startTime ? 'Start ' + r.meta.startTime : '')} · ${r.riders.length} riders</div>
+      <div class="count">${c.pulled} pulled${split ? ` <span class="split">· ${split}</span>` : ''}</div>
+    </div>`;
+  };
+  // One section per discipline and day (e.g. XCC Friday, XCO Saturday), in schedule order.
+  const groups = [];
+  for (const r of list) {
+    const key = discCode(r) + '|' + (r.meta.date || '');
+    let g = groups.find(x => x.key === key);
+    if (!g) groups.push(g = { key, code: discCode(r) || 'Other', name: r.meta.discipline || '', date: r.meta.date || '', races: [] });
+    g.races.push(r);
+  }
+  $('#raceList').innerHTML = groups.map(g => `
+    <div class="group-head"><h2>${esc(g.code)}</h2><span>${esc([g.name, g.date].filter(Boolean).join(' · '))}</span></div>
+    <div class="races">${g.races.map(card).join('')}</div>`).join('');
+}
+
+/* ---------- Race screen ---------- */
+function setFilter(f) {
+  filter = f;
+  document.querySelectorAll('#filterSeg button').forEach(b => b.classList.toggle('on', b.dataset.f === f));
+}
+function openRace(id) {
+  currentId = id;
+  autoOpened.add(id);
+  setFilter('all');
+  $('#search').value = '';
+  $('#moreTools').classList.add('hidden');
+  $('#home').classList.add('hidden');
+  $('#raceView').classList.remove('hidden');
+  $('#backBtn').classList.remove('hidden');
+  renderRace();
+  window.scrollTo(0, 0);
+  const ls = liveState[id];
+  if (!ls || !ls.lastTry || Date.now() - ls.lastTry > 10000) refreshLive(id);
+}
+
+function cutLineHtml(r) {
+  const cut = cutOf(r), l1 = r.results && r.results.leaderLap1;
+  const change = `<button class="btn small" id="cutBtn">${cut ? 'Change' : 'Set cut'}</button>`;
+  if (!cut) return `<span>Cut: <b>waiting for the leader's first lap</b></span>${change}`;
+  const why = r.cutOverride
+    ? `set by hand${l1 ? ` · 80% of lap 1 would be ${fmtDur(Math.round(l1 * 0.8))}` : ''}`
+    : `80% of the leader's first lap (${fmtDur(l1)})`;
+  return `<span>Cut</span><span class="cut">+${fmtDur(cut)}</span><span class="why">${esc(why)}</span>${change}`;
+}
+
+function renderRace() {
+  const r = races[currentId];
+  if (!r) return renderHome();
+  $('#title').textContent = raceTitle(r);
+  const c = counts(r);
+  $('#rvCount').textContent = `${c.pulled} pulled`;
+  $('#rvSub').textContent = [splitText(c), raceSub(r)].filter(Boolean).join(' · ');
+  $('#cutLine').innerHTML = cutLineHtml(r);
+  $('#liveNote').innerHTML = liveNoteHtml(r, c);
+  const places = pullPlaces(r);
+  const q = $('#search').value.trim().toLowerCase();
+  let list = filter === 'pulled' ? pullOrder(r) : orderedRiders(r);
+  if (filter === 'near') list = list.filter(x => riskOf(r, x.bib) || mismatch(r, x.bib) === 'Timing: -80%');
+  const rows = list.filter(x => {
+    if (!q) return true;
+    if (/^\d+$/.test(q)) return x.bib === q || x.bib.startsWith(q);
+    return [x.name, x.team, x.nat, x.uciId].join(' ').toLowerCase().includes(q);
+  });
+  const order = pullOrder(r);
+  const empty = filter === 'pulled' ? 'Nobody pulled yet.' : filter === 'near' ? 'Nobody is near the cut.' : 'No riders match.';
+  $('#rows').innerHTML = rows.map(x => {
+    const st = statusOf(r, x.bib), p = pullOf(r, x.bib), risk = riskOf(r, x.bib);
+    return `<tr class="rider ${p ? 'pulled' : ''} ${st ? 'out ' + st : ''} ${risk || ''}" data-bib="${esc(x.bib)}">
+      <td class="num hide-md">${esc(x.start)}${x.flag ? ` <span class="flag">${esc(x.flag)}</span>` : ''}</td>
+      <td class="ctr hide-sm">${x.outfit ? `<span class="outfit">${esc(x.outfit)}</span>` : ''}</td>
+      <td class="bib">${esc(x.bib)}</td>
+      <td><div class="nm">${esc(x.name)}</div><div class="team">${esc(x.team)}</div>${mismatch(r, x.bib) ? `<span class="tmis">${esc(mismatch(r, x.bib))}</span>` : ''}</td>
+      <td class="uciid hide-md">${esc(x.uciId)}</td>
+      <td>${esc(x.nat)}</td>
+      <td class="num hide-md">${esc(x.yob)}</td>
+      <td class="num hide-sm">${esc(x.wcs)}</td>
+      <td class="num hide-sm">${esc(x.uci)}</td>
+      ${resultCell(r, x.bib)}
+      ${gapCell(r, x.bib)}
+      <td class="ctr dns-cell"><button class="dns-btn" data-dns="${esc(x.bib)}">DNS</button>
+        <button class="dns-btn" data-dnf="${esc(x.bib)}">DNF</button></td>
+      ${pullCell(r, x, p, places[x.bib], order)}
+    </tr>`;
+  }).join('') || `<tr><td colspan="13" class="ctr" style="padding:30px;color:var(--muted)">${empty}</td></tr>`;
+}
+
+function gapCell(r, bib) {
+  const res = resOf(r, bib), cut = cutOf(r);
+  if (!res || res.gap == null || !res.inRace || pullOf(r, bib) || statusOf(r, bib)) return '<td class="gap"></td>';
+  const pct = cut && res.gap ? `<span class="pct">${Math.round(res.gap / cut * 100)}% of cut</span>` : '';
+  return `<td class="gap">${res.gap ? '+' + fmtDur(res.gap) : '—'}${pct}</td>`;
+}
+
+function pullCell(r, x, p, place, order) {
+  if (!p) return `<td class="ctr"><span class="pullbox">-80%</span><span class="when"></span></td>`;
+  let moves = '';
+  if (filter === 'pulled') {
+    // Reorder only within the same number of laps; laps decide the order between groups.
+    const i = order.findIndex(o => o.bib === x.bib);
+    const same = j => order[j] && (pullOf(r, order[j].bib).laps ?? -1) === (p.laps ?? -1);
+    moves = ` <button class="mini" data-up="${esc(x.bib)}" ${same(i - 1) ? '' : 'disabled'}>▲</button>`
+      + `<button class="mini" data-down="${esc(x.bib)}" ${same(i + 1) ? '' : 'disabled'}>▼</button>`;
+  }
+  return `<td class="ctr"><span class="place">${place ? ordinal(place.place) : ''}</span><span class="pullbox">-80%</span>
+    <span class="when">${fmtTime(p.at, true)}</span><button class="mini" data-laps="${esc(x.bib)}">${lapsText(p.laps)} ✎</button>${moves}</td>`;
+}
+function lapsText(n) { return n == null ? '? laps' : `${n} lap${n === 1 ? '' : 's'}`; }
+function ordinal(n) {
+  const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+/* ---------- Toast and undo ---------- */
+let undoState = null, toastTimer = null, toastAction = null;
+function toast(msg, undo, action) {
+  undoState = undo;
+  toastAction = action || null;
+  $('#toastMsg').textContent = msg;
+  $('#toastUndo').textContent = action ? action.label : 'Undo';
+  $('#toastUndo').classList.toggle('hidden', !undo && !action);
+  $('#toast').classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $('#toast').classList.add('hidden'), action ? 10000 : 5000);
+}
+// Every change saves a copy of the race's marks first, so Undo can put them back exactly.
+function snapshot(r) {
+  const s = { id: r.id, cutOverride: r.cutOverride ?? null };
+  for (const k of MARKS) s[k] = JSON.parse(JSON.stringify(r[k]));
+  return s;
+}
+function commit(r, msg, before) {
+  saveRaces(); renderRace();
+  toast(msg, before);
+}
+
+/* ---------- Marking ---------- */
+let lastTap = { key: null, t: 0 };
+function togglePull(bib) {
+  // Ignore an accidental double-tap on the same rider, which would otherwise pull then immediately ask to undo.
+  const now = Date.now();
+  if (lastTap.key === bib && now - lastTap.t < 600) return;
+  lastTap = { key: bib, t: now };
+  const r = races[currentId];
+  const label = riderLabel(r, bib);
+  const st = statusOf(r, bib);
+  if (st) { toast(`${label} is ${STATUS[st]}. Tap ${STATUS[st]} to clear it first.`); return; }
+  const before = snapshot(r);
+  const p = pullOf(r, bib);
+  if (p) {
+    if (!confirm(`Undo the pull for ${label}?\n\nPulled at ${fmtTime(p.at, true)} after ${lapsText(p.laps)}.`)) return;
+    delete r.pulled[bib];
+    return commit(r, `${label}: pull removed`, before);
+  }
+  // Laps completed come from live timing; without it, ask (the last answer is offered again).
+  const res = resOf(r, bib);
+  let laps = res && res.inRace ? res.done : null;
+  if (laps == null) {
+    const ans = prompt(`Laps completed by ${label}?`, r.lastLaps ?? '');
+    if (ans === null) return;
+    laps = /^\d+$/.test(ans.trim()) ? +ans.trim() : null;
+    if (laps != null) r.lastLaps = laps;
+  }
+  r.pulled[bib] = { at: new Date().toISOString(), laps };
+  const pl = pullPlaces(r)[bib];
+  commit(r, `${label} pulled after ${lapsText(laps)} · ${ordinal(pl.place)}`, before);
+}
+
+function editLaps(bib) {
+  const r = races[currentId], p = pullOf(r, bib);
+  if (!p) return;
+  const ans = prompt(`Laps completed by ${riderLabel(r, bib)} when pulled?`, p.laps ?? '');
+  if (ans === null) return;
+  if (!/^\d+$/.test(ans.trim())) { toast('Enter a whole number of laps.'); return; }
+  const before = snapshot(r);
+  p.laps = +ans.trim();
+  commit(r, `${riderLabel(r, bib)}: ${lapsText(p.laps)}`, before);
+}
+
+// Swap the pull times of two neighbours with the same laps, which swaps their order.
+function movePull(bib, dir) {
+  const r = races[currentId], order = pullOrder(r);
+  const i = order.findIndex(o => o.bib === bib), j = i + dir;
+  if (i < 0 || !order[j]) return;
+  const a = pullOf(r, bib), b = pullOf(r, order[j].bib);
+  if ((a.laps ?? -1) !== (b.laps ?? -1)) return;
+  const before = snapshot(r);
+  [a.at, b.at] = [b.at, a.at];
+  commit(r, `Moved ${riderLabel(r, bib)} ${dir < 0 ? 'up' : 'down'}`, before);
+}
+
+function toggleStatus(bib, kind) {
+  const r = races[currentId];
+  const label = riderLabel(r, bib), name = STATUS[kind];
+  const other = kind === 'dns' ? 'dnf' : 'dns';
+  const before = snapshot(r);
+  if (r[kind][bib]) {
+    if (!confirm(`Remove ${name} for ${label}?`)) return;
+    delete r[kind][bib];
+    // Don't let live timing put back a mark the user removed.
+    if (r.auto[bib] === kind) { r.autoDismissed[bib] = kind; delete r.auto[bib]; }
+    return commit(r, `${label}: ${name} removed`, before);
+  }
+  const clash = [r[other][bib] ? `is marked ${STATUS[other]}` : '', pullOf(r, bib) ? 'is pulled' : ''].filter(Boolean);
+  if (clash.length && !confirm(`${label} ${clash.join(' and ')}. Mark as ${name} instead?`)) return;
+  delete r[other][bib]; delete r.pulled[bib]; delete r.auto[bib];
+  r[kind][bib] = new Date().toISOString();
+  commit(r, `${label} marked ${name}`, before);
+}
+
+function changeCut() {
+  const r = races[currentId], auto = autoCut(r);
+  const ans = prompt(`Cut time as m:ss (gap to the leader).${auto ? `\n\nLeave empty to use 80% of the leader's first lap: ${fmtDur(auto)}.` : ''}`,
+    r.cutOverride ? fmtDur(r.cutOverride) : '');
+  if (ans === null) return;
+  const before = snapshot(r);
+  if (!ans.trim()) { delete r.cutOverride; return commit(r, 'Cut set back to 80% of lap 1', before); }
+  const ms = parseDur(ans);
+  if (!ms) { toast('Enter the cut as m:ss, e.g. 9:30'); return; }
+  r.cutOverride = ms;
+  commit(r, `Cut set to +${fmtDur(ms)}`, before);
+}
+
+function exportCsv() {
+  const r = races[currentId];
+  const places = pullPlaces(r);
+  const head = ['Start', 'Outfit', 'Nr', 'Name', 'Team', 'UCI ID', 'NAT', 'YOB', 'WCS', 'UCI',
+    'Status', 'Laps completed', 'Pulled at', 'Pull order', 'Projected place', 'Timing result'];
+  const q = v => /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  const lines = [head.join(',')].concat(orderedRiders(r).map(x => {
+    const st = statusOf(r, x.bib), p = pullOf(r, x.bib), pl = places[x.bib];
+    return [
+      x.start, x.outfit, x.bib, x.name, x.team, x.uciId, x.nat, x.yob, x.wcs, x.uci,
+      st ? STATUS[st] : p ? '-80%' : '', p ? p.laps ?? '' : '', p ? new Date(p.at).toLocaleString() : '',
+      pl ? pl.n : '', pl ? pl.place : '', resultLabel(resOf(r, x.bib)),
+    ].map(v => q(String(v ?? ''))).join(',');
+  }));
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+  const name = (raceTitle(r) + ' ' + (r.meta.date || '')).trim().replace(/[^\w-]+/g, '_') + '_80pct.csv';
+  const file = new File([blob], name, { type: 'text/csv' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({ files: [file], title: name }).catch(() => {});
+  } else {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+}
+
+/* ---------- Live results (ChronoRace) ---------- */
+// Live updates can reorder rows; wait until 2s after the last tap so a row never moves under the user's finger.
+let renderTimer = null, lastTapAt = 0;
+function renderSoon() {
+  clearTimeout(renderTimer);
+  const wait = 2000 - (Date.now() - lastTapAt);
+  if (wait > 0) renderTimer = setTimeout(renderSoon, wait);
+  else if (currentId) renderRace();
+}
+document.addEventListener('pointerdown', () => { lastTapAt = Date.now(); }, true);
+// The UCI live timing site (live.ucimtbworldseries.com) embeds ChronoRace. Its JSON feeds allow cross-origin reads:
+//   event menu:  api/results/uci/dh/cms/<event>        e.g. 20261002_mtb (the event's first day)
+//   per race:    api/results/xco/<event>/overview/<key> and /registration/<key>   (key e.g. XCCWE, ME)
+// Riders are matched by UCI ID because live bibs can differ from the start list (bib 6 showed as 666).
+const CR_API = 'https://prod.chronorace.be/api/results/';
+const liveState = {};          // per race id: { busy, lastTry, error, reg }
+function crGet(path) {
+  return fetch(CR_API + path, { cache: 'no-store' }).then(res => {
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  });
+}
+function ymd(d) { return d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0'); }
+
+async function findLiveRace(r) {
+  const disc = /SHORT TRACK/i.test(r.meta.discipline || '') ? 'XCC' : /DOWNHILL/i.test(r.meta.discipline || '') ? null : 'XCO';
+  const st = startDate(r);
+  if (!disc || !st || !r.meta.category) return null;
+  // The event folder is named after the event's first day, so look back a few days from this race.
+  for (let back = 0; back <= 4; back++) {
+    const d = new Date(st); d.setDate(d.getDate() - back);
+    const event = ymd(d) + '_mtb';
+    const cms = await crGet('uci/dh/cms/' + event).catch(() => null);
+    if (!cms) continue;
+    const discNode = (cms.Childs || []).find(c => c.Id === disc);
+    const cat = discNode && (discNode.Childs || []).find(c => (c.DisplayName || '').toLowerCase() === r.meta.category.toLowerCase());
+    if (!cat) continue;
+    let key = null;
+    (function walk(n) {
+      if (key) return;
+      if (n.Route) { try { key = JSON.parse(n.Route).Params.key; } catch (e) {} }
+      (n.Childs || []).forEach(walk);
+    })(cat);
+    if (key) return { event, key };
+  }
+  return null;
+}
+
+function resultLabel(res) {
+  if (!res) return '';
+  if (res.status === 'OK') return res.pos ? String(res.pos) : '';
+  if (res.status === 'R80') return '-80%';
+  return res.status;
+}
+
+async function refreshLive(id) {
+  const r = races[id];
+  const ls = liveState[id] || (liveState[id] = {});
+  if (!r || ls.busy) return;
+  ls.busy = true; ls.lastTry = Date.now();
+  try {
+    if (!r.live) {
+      r.live = await findLiveRace(r);
+      if (!r.live) { ls.error = 'not found'; return; }
+      saveRaces();
+    }
+    // Registration doesn't change during a race, so it is fetched once per session.
+    const [ov, reg] = await Promise.all([
+      crGet(`xco/${r.live.event}/overview/${r.live.key}`),
+      ls.reg ? ls.reg : crGet(`xco/${r.live.event}/registration/${r.live.key}`),
+    ]);
+    ls.error = null;
+    if (!ov || !ov.OverviewData) { ls.waiting = true; return; }
+    ls.waiting = false;
+    if (reg && Object.keys(reg).length) ls.reg = reg;
+    const byDossard = {};
+    for (const row of ov.OverviewData) byDossard[row.Dossard] = row;
+    const byUci = {};
+    for (const reg1 of Object.values(reg || {})) if (reg1.RiderId) byUci[reg1.RiderId] = reg1.Dossard;
+    // Race time at which the leader finished each lap. A rider still on lap L is at least (race time now - leader's
+    // lap L time) behind, which catches riders a lap down whose timing gap is only measured at their last point.
+    const leaderAt = {};
+    for (const o of ov.OverviewData) for (const l of o.LapDetails || []) {
+      if (l.TotalTime > 0 && !(leaderAt[l.LapNr] <= l.TotalTime)) leaderAt[l.LapNr] = l.TotalTime;
+    }
+    const byBib = {};
+    for (const x of r.riders) {
+      let dos = x.uciId && byUci[x.uciId];
+      if (!dos) { const m = ov.OverviewData.find(o => o.Dossard % 1000 === +x.bib); dos = m && m.Dossard; }
+      const row = dos && byDossard[dos];
+      if (!row) continue;
+      const cs = row.CurrentSituation || {};
+      const laps = row.LapDetails || [];
+      const lap = cs.Lap || laps.length + 1;
+      let gap = cs.GapWithFirst ?? null;
+      if (row.InRace && leaderAt[lap] && ov.RaceTime > leaderAt[lap]) gap = Math.max(gap || 0, ov.RaceTime - leaderAt[lap]);
+      byBib[x.bib] = {
+        pos: row.Pos, status: row.Status, inRace: !!row.InRace,
+        lap,                                  // lap the rider is on now
+        done: laps.length,                    // laps completed (finish-line crossings)
+        gap,                                  // gap to the leader, ms
+      };
+    }
+    // The leader's first lap: the fastest time to the end of lap 1 across the field.
+    let leaderLap1 = null;
+    for (const o of ov.OverviewData) for (const l of o.LapDetails || []) {
+      if (l.LapNr === 1 && l.TotalTime > 0 && (leaderLap1 == null || l.TotalTime < leaderLap1)) leaderLap1 = l.TotalTime;
+    }
+    // Started once any rider has crossed a timing point (finish line or intermediate time check).
+    const started = ov.OverviewData.some(o => (o.LapDetails || []).length > 0 || (o.CurrentSituation && o.Pos > 0));
+    r.results = { byBib, status: ov.Status, started, curLap: ov.CurLap, maxLaps: ov.MaxLaps, leaderLap1, at: new Date().toISOString() };
+    applyAutoStatus(r);
+    saveRaces();
+  } catch (e) {
+    ls.error = navigator.onLine === false ? 'offline' : 'error';
+  } finally {
+    ls.busy = false;
+    if (currentId === id) renderSoon();
+  }
+}
+
+// Timing DNS/DNF become app DNS/DNF. Manual marks and pulls are never overwritten, a mark the user removed is not
+// re-applied, and an automatic mark is taken back if timing corrects itself. Timing -80% is only flagged, never applied:
+// the 80% official's own list is the record.
+function applyAutoStatus(r) {
+  const added = [];
+  for (const x of r.riders) {
+    const res = r.results.byBib[x.bib];
+    const want = res && res.status === 'DNS' ? 'dns' : res && res.status === 'DNF' ? 'dnf' : null;
+    const cur = statusOf(r, x.bib);
+    if (want) {
+      if (cur || pullOf(r, x.bib) || r.autoDismissed[x.bib] === want) continue;
+      r[want][x.bib] = new Date().toISOString();
+      r.auto[x.bib] = want;
+      added.push(`#${x.bib} ${STATUS[want]}`);
+    } else if (r.auto[x.bib] && cur === r.auto[x.bib]) {
+      delete r[cur][x.bib];
+      delete r.auto[x.bib];
+    }
+  }
+  if (added.length && races[currentId] === r) toast('Live timing marked ' + added.join(', '));
+}
+
+// Running order: riders still racing by live position, then pulled riders in pull order, then DNF, then DNS.
+function orderedRiders(r) {
+  const res = r.results, live = !!res && (res.status === 'Finished' || !!res.started);
+  const pulled = pullOrder(r).map(x => x.bib);
+  const rank = x => {
+    if (isDns(r, x.bib)) return 4e6 + (+x.start || 0);
+    if (isDnf(r, x.bib)) return 3e6 + (+x.start || 0);
+    if (pullOf(r, x.bib)) return 2e6 + pulled.indexOf(x.bib);
+    const rr = live && res.byBib[x.bib];
+    if (!live) return +x.start || 0;
+    if (!rr || !rr.pos) return 1e6 + (+x.start || 0);
+    return rr.status === 'OK' ? rr.pos : 1e5 + rr.pos;
+  };
+  return [...r.riders].sort((a, b) => rank(a) - rank(b));
+}
+
+function resultCell(r, bib) {
+  const res = resOf(r, bib);
+  if (!res) return '<td class="res"></td>';
+  const label = resultLabel(res);
+  if (res.status === 'OK') return `<td class="res">${esc(label)}${res.inRace ? `<span class="live">LAP ${res.lap}</span>` : ''}</td>`;
+  const cls = res.status === 'DNF' ? 'dnf' : res.status === 'R80' ? 'r80' : 'bad';
+  return `<td class="res"><span class="rs ${cls}">${esc(label)}</span></td>`;
+}
+
+function liveNoteHtml(r, c) {
+  const ls = liveState[r.id] || {};
+  const res = r.results;
+  const parts = [];
+  if (res) {
+    if (res.status === 'Finished') parts.push('<b>Finished</b>');
+    else if (res.maxLaps) parts.push(`<b>Leader lap ${res.curLap} / ${res.maxLaps}</b>${res.curLap === res.maxLaps ? ' <span class="warn">last lap</span>' : ''}`);
+    parts.push('updated ' + fmtTime(res.at, true));
+    if (c.timingR80 || c.pulled) parts.push(`timing shows ${c.timingR80} at -80%`);
+    if (c.mismatch) parts.push(`<span class="warn">${c.mismatch} differ from your list</span>`);
+  }
+  if (ls.error === 'offline') parts.push('offline, showing last results');
+  else if (ls.error === 'error') parts.push('could not reach live timing');
+  else if (ls.error === 'not found') parts.push('race not found on live timing yet');
+  else if (ls.waiting && !res) parts.push('waiting for the race to start');
+  else if (!res && ls.busy) parts.push('connecting…');
+  return parts.length ? 'Live timing: ' + parts.join(' · ') : '';
+}
+
+// Poll the open race: every 10s while racing (gaps matter at the zone), every 2 min once finished or not found.
+setInterval(() => {
+  if (!currentId || document.visibilityState !== 'visible') return;
+  const r = races[currentId], ls = liveState[currentId] || {};
+  if (!r) return;
+  const finished = r.results && r.results.status === 'Finished';
+  const wait = (finished || ls.error === 'not found') ? 120000 : 10000;
+  if (!ls.lastTry || Date.now() - ls.lastTry >= wait) refreshLive(currentId);
+}, 5000);
+
+/* ---------- Events ---------- */
+$('#importBtn').onclick = () => $('#fileInput').click();
+$('#fileInput').onchange = async e => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  const msgs = [];
+  let lastId = null;
+  for (const f of files) {
+    try {
+      const res = await importFile(f);
+      lastId = res.id;
+      msgs.push(`${races[res.id].meta.category || f.name}: ${res.count} riders${res.updated ? ' (updated, pulls kept)' : ''}`);
+    } catch (err) {
+      msgs.push(`${f.name}: ${err.message}`);
+    }
+  }
+  if (files.length === 1 && lastId) openRace(lastId); else renderHome();
+  toast(msgs.join(' · '));
+};
+$('#backBtn').onclick = renderHome;
+$('#raceList').onclick = e => { const c = e.target.closest('.race-card'); if (c) openRace(c.dataset.id); };
+$('#rows').onclick = e => {
+  const b = e.target.closest('[data-dns],[data-dnf],[data-laps],[data-up],[data-down]');
+  if (b) {
+    if (b.disabled) return;
+    const d = b.dataset;
+    if (d.dns) return toggleStatus(d.dns, 'dns');
+    if (d.dnf) return toggleStatus(d.dnf, 'dnf');
+    if (d.laps) return editLaps(d.laps);
+    if (d.up) return movePull(d.up, -1);
+    if (d.down) return movePull(d.down, 1);
+  }
+  const tr = e.target.closest('tr.rider');
+  if (tr) togglePull(tr.dataset.bib);
+};
+$('#cutLine').onclick = e => { if (e.target.closest('#cutBtn')) changeCut(); };
+$('#search').oninput = renderRace;
+$('#filterSeg').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  setFilter(b.dataset.f);
+  renderRace();
+};
+$('#moreBtn').onclick = () => $('#moreTools').classList.toggle('hidden');
+$('#exportBtn').onclick = exportCsv;
+$('#resetBtn').onclick = () => {
+  const r = races[currentId];
+  if (!confirm('Clear every pull, DNS and DNF for this race?')) return;
+  const before = snapshot(r);
+  for (const k of MARKS) r[k] = {};
+  commit(r, 'Cleared all pulls, DNS and DNF', before);
+};
+$('#deleteBtn').onclick = () => {
+  if (!confirm('Remove this race and its pulls from the iPad?')) return;
+  delete races[currentId]; saveRaces(); renderHome();
+};
+$('#toastUndo').onclick = () => {
+  if (toastAction) { const a = toastAction; toastAction = null; $('#toast').classList.add('hidden'); return a.fn(); }
+  if (!undoState) return;
+  const u = undoState, r = races[u.id];
+  undoState = null;
+  $('#toast').classList.add('hidden');
+  if (!r) return;
+  for (const k of MARKS) r[k] = u[k];
+  if (u.cutOverride) r.cutOverride = u.cutOverride; else delete r.cutOverride;
+  saveRaces();
+  if (currentId) renderRace();
+};
+
+const APP_VERSION = 1;
+$('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+    .then(reg => reg.update()).catch(() => {});
+  // When a new version takes over, reload once so the new screens appear without another restart.
+  let reloaded = false;
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
+}
+// Ask the browser not to evict our saved data.
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+
+/* ---------- Auto-open the current race ---------- */
+// The "current" race is the one whose start is less than 20 minutes away, or the most recent one that has started
+// (within 3 hours). On launch the app opens it directly; while running it switches once per race at T-20 minutes.
+const AUTO_OPEN_BEFORE = 20 * 60000, STALE_AFTER = 3 * 3600000;
+let lastInteraction = 0;
+['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, () => { lastInteraction = Date.now(); }, true));
+function currentRaceId(now = Date.now()) {
+  let best = null, bestStart = -Infinity;
+  for (const r of Object.values(races)) {
+    const st = startDate(r);
+    if (!st) continue;
+    const t = st.getTime();
+    if (now >= t - AUTO_OPEN_BEFORE && now < t + STALE_AFTER && t > bestStart) { best = r.id; bestStart = t; }
+  }
+  return best;
+}
+function autoOpenTick() {
+  const id = currentRaceId();
+  if (!id || id === currentId || autoOpened.has(id)) return;
+  // Don't switch under the user's finger or mid-search.
+  if (Date.now() - lastInteraction < 30000 || document.activeElement === $('#search')) return;
+  const prev = currentId;
+  openRace(id);
+  const r = races[id];
+  toast(`Opened ${raceTitle(r)} (start ${fmtTime(startDate(r))})`, null,
+    prev && races[prev] ? { label: `Back to ${raceTitle(races[prev])}`, fn: () => openRace(prev) } : null);
+}
+setInterval(autoOpenTick, 15000);
+
+const startId = currentRaceId();
+if (startId) openRace(startId); else renderHome();
+</script>
+</body>
+</html>
