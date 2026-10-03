@@ -1227,16 +1227,16 @@ function liveNoteHtml(r) {
   return (parts.length ? 'Live timing: ' + parts.join(' · ') : '') + ` <span class="sub">· ${esc(raceSub(r))}</span>`;
 }
 
-// Poll the open race: every second while it is running, every 10s before the start (or while timing has nothing yet),
-// every 2 min once finished or not found. (ChronoRace's own live page polls every 3s.)
+// Poll the open race: every 3s while it is running (the same as ChronoRace's own live page), every 10s before the start (or while timing has nothing yet),
+// every 2 min once finished or not found.
 setInterval(() => {
   if (!currentId || document.visibilityState !== 'visible') return;
   const r = races[currentId], ls = liveState[currentId] || {};
   if (!r) return;
   const finished = r.results && r.results.status === 'Finished';
   const running = r.results && r.results.status === 'InProgress' && !ls.error;
-  const wait = (finished || ls.error === 'not found') ? 120000 : running ? 1000 : 10000;
-  // A little slack: the 1s tick can land a few ms early, which would otherwise skip every other check.
+  const wait = (finished || ls.error === 'not found') ? 120000 : running ? 3000 : 10000;
+  // A little slack: the 1s tick can land a few ms early, which would otherwise delay a check by a whole second.
   if (!ls.lastTry || Date.now() - ls.lastTry >= wait - 200) refreshLive(currentId);
 }, 1000);
 
@@ -1305,7 +1305,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 14;
+const APP_VERSION = 15;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
