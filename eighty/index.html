@@ -1246,10 +1246,24 @@ async function refreshLive(id) {
     for (const reg1 of Object.values(reg || {})) if (reg1.RiderId) byUci[reg1.RiderId] = reg1.Dossard;
     // Race time at which the leader finished each lap. A rider still on lap L is at least (race time now - leader's
     // lap L time) behind, which catches riders a lap down whose timing gap is only measured at their last point.
-    const leaderAt = {};
-    for (const o of ov.OverviewData) for (const l of o.LapDetails || []) {
-      if (l.TotalTime > 0 && !(leaderAt[l.LapNr] <= l.TotalTime)) leaderAt[l.LapNr] = l.TotalTime;
+    // Clean each rider's finish-line crossings first: timing can record a false crossing (Lake Placid men's elite:
+    // the two leaders got laps of 7:55 then 1:19 instead of one 9:14 lap). A lap shorter than half a normal lap is
+    // joined back onto the lap before it, and the rider's lap number drops by one for each crossing removed.
+    const allLaps = [];
+    for (const o of ov.OverviewData) for (const l of o.LapDetails || []) if (l.LapTime > 0) allLaps.push(l.LapTime);
+    const normalLap = median(allLaps);
+    const clean = {};
+    for (const o of ov.OverviewData) {
+      const t = (o.LapDetails || []).map(l => l.TotalTime).filter(v => v > 0);
+      let removed = 0, firstBad = null;
+      for (let i = 1; normalLap && i < t.length; i++) {
+        if (t[i] - t[i - 1] < normalLap * 0.5) { t.splice(i - 1, 1); removed++; if (firstBad == null) firstBad = i; i--; }
+      }
+      if (t.length && normalLap && t[0] < normalLap * 0.5 && o.LapDetails.length > 1) { t.shift(); removed++; if (firstBad == null) firstBad = 1; }
+      clean[o.Dossard] = { lt: t, removed, firstBad };
     }
+    const leaderAt = {};
+    for (const c of Object.values(clean)) c.lt.forEach((v, i) => { if (!(leaderAt[i + 1] <= v)) leaderAt[i + 1] = v; });
     // Timing checkpoints around the lap are numbered in course order (1, 2, ... before the finish line, 0 at the line).
     // The feed doesn't say how many there are, so remember the highest one any rider has reached in this race.
     for (const o of ov.OverviewData) {
@@ -1263,16 +1277,24 @@ async function refreshLive(id) {
       const row = dos && byDossard[dos];
       if (!row) continue;
       const cs = row.CurrentSituation || {};
-      const laps = row.LapDetails || [];
+      const cl = clean[row.Dossard], ltc = cl.lt;
+      const csLap = cs.Lap ? cs.Lap - cl.removed : 0;
       // At the line (checkpoint 0) timing still reports the lap just completed; the rider is starting the next one.
-      const lap = cs.LapLocation === 0 && laps.length >= (cs.Lap || 0) ? laps.length + 1 : cs.Lap || laps.length + 1;
+      const lap = cs.LapLocation === 0 && ltc.length >= csLap ? ltc.length + 1 : csLap || ltc.length + 1;
+      // Checkpoint times recorded under the false lap numbers are dropped; timing records them again on the next pass.
+      // Done once per glitch, so times recorded after the clean-up are kept.
+      const sig = cl.removed ? cl.firstBad + '/' + cl.removed + '/' + (row.LapDetails || []).length : null;
+      if (sig && (r.cleaned = r.cleaned || {})[x.bib] !== sig) {
+        r.cleaned[x.bib] = sig;
+        if (r.splits && r.splits[x.bib]) for (const k of Object.keys(r.splits[x.bib])) if (+k.split(':')[0] >= cl.firstBad) delete r.splits[x.bib][k];
+      }
       let gap = cs.GapWithFirst ?? null;
       if (row.InRace && leaderAt[lap] && ov.RaceTime > leaderAt[lap]) gap = Math.max(gap || 0, ov.RaceTime - leaderAt[lap]);
       const ranks = row.RanksAfterLapAfterLap || [];
       byBib[x.bib] = {
         pos: row.Pos, status: row.Status, inRace: !!row.InRace, lap, gap,
-        done: laps.length,                          // laps completed
-        lt: laps.map(l => l.TotalTime),             // race time at the end of each lap
+        done: ltc.length,                           // laps completed
+        lt: ltc,                                    // race time at the end of each lap
         loc: cs.LapLocation || 0,                   // last timing point passed in the current lap
         inLap: cs.LapTime ?? null,                  // time into the current lap at that point
         rankAfter: ranks[ranks.length - 1] || null, // position at the end of the last lap
@@ -1287,7 +1309,9 @@ async function refreshLive(id) {
     const leaderLap1 = leaderAt[1] || null;
     // Started once any rider has crossed a timing point (finish line or intermediate time check).
     const started = ov.OverviewData.some(o => (o.LapDetails || []).length > 0 || (o.CurrentSituation && o.Pos > 0));
-    r.results = { byBib, status: ov.Status, started, curLap: ov.CurLap, maxLaps: ov.MaxLaps, leaderLap1, leaderAt,
+    // Leader's lap from the cleaned laps (timing's CurLap counts any false crossing).
+    const curLap = Math.max(0, ...Object.values(byBib).filter(b => b.inRace && b.status === 'OK').map(b => b.lap)) || ov.CurLap;
+    r.results = { byBib, status: ov.Status, started, curLap, maxLaps: ov.MaxLaps, leaderLap1, leaderAt,
       raceTime: ov.RaceTime, at: new Date().toISOString() };
     // Live timing says the race is over: stop and reset the 80% timer.
     if (ov.Status === 'Finished' && r.timer) {
@@ -1454,7 +1478,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 24;
+const APP_VERSION = 25;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
