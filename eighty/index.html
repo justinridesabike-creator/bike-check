@@ -267,7 +267,7 @@ table.sl tr.zone-div b { margin-right: 18px; }
     as the timer; riders past it show their gap at checkpoint 13. <b>Live gap</b> follows timing round the course, with ▲ time lost or ▼ gained since checkpoint 13. Yellow: past 50% of the leader's first lap.
     Red: past 75%. PULL: past 80% (the pull time). Orange: losing more time than on their previous lap (crash or mechanical?). Pulsing blue: lapped, not at checkpoint 13 since your
     previous Leader through tap, so look for them.
-    Under each name: when the rider should come into view at the 80% zone (20 seconds after checkpoint 13), from their earlier laps and current pace, and a forecast:
+    Under each name: when the rider should come into view at the 80% zone (17 seconds after checkpoint 13), from their earlier laps and current pace, and a forecast:
     <b>PULL LIKELY</b> if their projected gap there is past the pull time, <b>Possible pull</b> if past 75% or heading there. <b>SAFE</b>: took the bell (crossed the line after the leader started the last lap) or the leader has finished; no more pulls for them.
     <b>Pulled</b> only changes how a rider is shown. Tap a rider for their report of every pass of the 80% zone.</p>
 </section>
@@ -947,8 +947,8 @@ function renderReport() {
       : '<p class="rep-sub">No pass of the 80% zone yet.</p>'}`;
 }
 
-// Riders come into view at the 80% zone about 20 seconds after they pass checkpoint 13.
-const VIEW_DELAY = 20000;
+// Riders come into view at the 80% zone about 17 seconds after they pass checkpoint 13.
+const VIEW_DELAY = 17000;
 function etaHtml(r, bib) {
   if (safeOf(r, bib)) return '';
   const R = r.results, res = resOf(r, bib);
@@ -1417,7 +1417,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 21;
+const APP_VERSION = 22;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
