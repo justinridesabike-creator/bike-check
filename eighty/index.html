@@ -1372,6 +1372,7 @@ async function refreshLive(id) {
         loc: cs.LapLocation || 0,                   // last timing point passed in the current lap
         inLap: isNaN(inLap) ? null : inLap,         // time into the current lap at that point
         rankAfter: ranks[ranks.length - 1] || null, // position at the end of the last lap
+        lastT: cs.TotalTime ?? null,                // race time at the last timing point (raw)
       };
       // Remember when each rider reached each timing point on each lap, to compare with the next lap.
       if (row.InRace && cs.LapLocation && inLap != null && !isNaN(inLap) && inLap > 0) {
@@ -1414,13 +1415,22 @@ async function refreshLive(id) {
   }
 }
 
-// Riders marked Pulled, in the order they were tapped (marks saved by older versions, without a time, come first).
+// Every pulled rider (marked Pulled here, or at -80% in timing) in results order: more laps completed first, so a
+// rider pulled later in the race is above one pulled earlier; then in the order they were pulled on that lap. For a
+// rider marked here that is the tap (so the official's order wins while timing catches up); for one only timing has
+// at -80% it is timing's last record of them, about when they reached the zone.
 function pulledOrder(r) {
-  const p = r.pulled || {};
-  return Object.keys(p).sort((a, b) => (p[a] === true ? 0 : p[a]) - (p[b] === true ? 0 : p[b]));
+  const p = r.pulled || {}, R = r.results;
+  const out = r.riders.filter(x => p[x.bib] || (R && R.byBib[x.bib] && R.byBib[x.bib].status === 'R80')).map(x => {
+    const res = R && R.byBib[x.bib];
+    let t = res && res.lastT != null ? res.lastT : Infinity;
+    if (p[x.bib] && p[x.bib] !== true && R) t = R.raceTime + (p[x.bib] - Date.parse(R.at));
+    return { bib: x.bib, laps: res ? res.done : 0, t };
+  });
+  out.sort((a, b) => b.laps - a.laps || a.t - b.t);
+  return out.map(o => o.bib);
 }
-// Running order: riders still racing by live position; then riders marked Pulled in the order they were pulled;
-// then riders timing has at -80% (not marked), DNF, DSQ, DNS.
+// Running order: riders still racing by live position; then all pulled riders (pulledOrder); then DNF, DSQ, DNS.
 function orderedRiders(r) {
   const res = r.results, live = !!res && (res.status === 'Finished' || !!res.started);
   const pOrder = pulledOrder(r);
@@ -1429,7 +1439,7 @@ function orderedRiders(r) {
   const later = { R80: 2e5, DNF: 3e5, DSQ: 4e5, DNS: 5e5 };
   const rank = x => {
     const rr = res.byBib[x.bib];
-    if (isPulled(r, x.bib)) return pulledRank(x.bib);
+    if (isPulled(r, x.bib) || (rr && rr.status === 'R80')) return pulledRank(x.bib);
     if (!rr) return 1e6 + (+x.start || 0);
     return (later[rr.status] || (rr.status === 'OK' ? 0 : 1e5)) + (rr.pos || 9e4);
   };
@@ -1572,7 +1582,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 31;
+const APP_VERSION = 32;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
