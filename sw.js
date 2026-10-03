@@ -1,5 +1,5 @@
 // Offline cache: bump VERSION (and APP_VERSION in index.html) whenever app files change.
-const VERSION = 'bikecheck-v13';
+const VERSION = 'bikecheck-v14';
 const FILES = ['./', 'index.html', 'manifest.json', 'icon-180.png', 'icon-512.png',
   'vendor/pdf.min.js', 'vendor/pdf.worker.min.js'];
 
@@ -10,7 +10,8 @@ self.addEventListener('install', e => {
     .then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k))))
+  // Only delete this app's old caches: the 80% Zone app shares this site and keeps its own.
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith('bikecheck-') && k !== VERSION).map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 // Network first, bypassing the HTTP cache so updates show up immediately; fall back to our cache when offline.
