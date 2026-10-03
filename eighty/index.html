@@ -1093,6 +1093,9 @@ async function refreshLive(id) {
     ]);
     ls.error = null;
     if (!ov || !ov.OverviewData) { ls.waiting = true; return; }
+    // Unchanged since the last check: nothing to recompute or redraw.
+    if (ov.GeneratedDateTime && ov.GeneratedDateTime === ls.lastGen && r.results && !ls.error) { ls.unchanged = true; return; }
+    ls.lastGen = ov.GeneratedDateTime;
     ls.waiting = false;
     if (reg && Object.keys(reg).length) ls.reg = reg;
     const byDossard = {};
@@ -1154,7 +1157,8 @@ async function refreshLive(id) {
     ls.error = navigator.onLine === false ? 'offline' : 'error';
   } finally {
     ls.busy = false;
-    if (currentId === id) renderSoon();
+    if (currentId === id && !ls.unchanged) renderSoon();
+    ls.unchanged = false;
   }
 }
 
@@ -1223,15 +1227,18 @@ function liveNoteHtml(r) {
   return (parts.length ? 'Live timing: ' + parts.join(' · ') : '') + ` <span class="sub">· ${esc(raceSub(r))}</span>`;
 }
 
-// Poll the open race: every 10s while racing, every 2 min once finished or not found.
+// Poll the open race: every second while it is running, every 10s before the start (or while timing has nothing yet),
+// every 2 min once finished or not found. (ChronoRace's own live page polls every 3s.)
 setInterval(() => {
   if (!currentId || document.visibilityState !== 'visible') return;
   const r = races[currentId], ls = liveState[currentId] || {};
   if (!r) return;
   const finished = r.results && r.results.status === 'Finished';
-  const wait = (finished || ls.error === 'not found') ? 120000 : 10000;
-  if (!ls.lastTry || Date.now() - ls.lastTry >= wait) refreshLive(currentId);
-}, 5000);
+  const running = r.results && r.results.status === 'InProgress' && !ls.error;
+  const wait = (finished || ls.error === 'not found') ? 120000 : running ? 1000 : 10000;
+  // A little slack: the 1s tick can land a few ms early, which would otherwise skip every other check.
+  if (!ls.lastTry || Date.now() - ls.lastTry >= wait - 200) refreshLive(currentId);
+}, 1000);
 
 /* ---------- Events ---------- */
 $('#importBtn').onclick = () => $('#fileInput').click();
@@ -1298,7 +1305,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 13;
+const APP_VERSION = 14;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
