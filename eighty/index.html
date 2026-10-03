@@ -195,6 +195,7 @@ table.sl tr.out td:not(.res) { opacity: .4; }
       <button id="moreBtn" class="btn small">More…</button>
     </div>
     <div id="moreTools" class="tools hidden">
+      <button id="zoneBtn" class="btn small">80% zone checkpoint: <span id="zoneLocV">13</span></button>
       <button id="timerResetBtn" class="btn small danger">Reset timer</button>
       <button id="deleteBtn" class="btn small danger">Remove this race</button>
     </div>
@@ -219,8 +220,9 @@ table.sl tr.out td:not(.res) { opacity: .4; }
     <tbody id="rows"></tbody>
   </table>
   <p class="footer-note">Riders are sorted by live position from every timing point around the course. Tap <b>Leader through</b> each
-    time the leader passes the 80% zone: riders not through yet are as far behind as the timer. Yellow: past 50% of the pull time.
-    Red: past 75%. PULL: past the pull time. Orange: losing more time than on their previous lap (crash or mechanical?). Pulsing blue: lapped, not through since your
+    time the leader passes the 80% zone (about timing checkpoint 13): riders who haven't reached checkpoint 13 yet are as far behind
+    as the timer; riders past it show their gap to the leader at checkpoint 13. Yellow: past 50% of the pull time.
+    Red: past 75%. PULL: past the pull time. Orange: losing more time than on their previous lap (crash or mechanical?). Pulsing blue: lapped, not at checkpoint 13 since your
     previous Leader through tap, so look for them.
     <b>Pulled</b> only changes how a rider is shown.</p>
 </section>
@@ -394,7 +396,7 @@ async function importFile(file) {
   const id = [meta.date, meta.discipline, meta.category, meta.startTime].filter(Boolean).join(' | ') || file.name;
   const existing = races[id];
   // Re-importing a revised start list keeps the race's pull time, timer, pulled riders and live link.
-  const keep = existing ? { cutOverride: existing.cutOverride, timer: existing.timer, pulled: existing.pulled, splits: existing.splits, maxLoc: existing.maxLoc,
+  const keep = existing ? { cutOverride: existing.cutOverride, zoneLoc: existing.zoneLoc, timer: existing.timer, pulled: existing.pulled, splits: existing.splits, maxLoc: existing.maxLoc,
     live: existing.live, results: existing.results } : {};
   races[id] = {
     id, meta, riders, ...keep,
@@ -472,28 +474,50 @@ function racing(r, bib) {
   return !!res && res.inRace && res.status === 'OK' && !isPulled(r, bib);
 }
 
-// Time behind the leader at the 80% zone. The zone has no timing point, so it runs off the official's timer:
-// - riders who have crossed the line since the leader's pass (the zone is just before it) keep the gap they had
-//   at the line on that lap;
+// The 80% zone sits at about timing checkpoint 13 (it can be changed under More… for another venue).
+const ZONE_LOC = 13;
+function zoneLoc(r) { return r.zoneLoc || ZONE_LOC; }
+// Has the rider reached the zone checkpoint on the given lap (or gone beyond that lap)?
+function pastZone(r, res, lap) { return res.lap > lap || (res.lap === lap && res.loc >= zoneLoc(r)); }
+// Race time at which the rider passed the zone checkpoint on a lap, from the split times seen while polling.
+function zoneTime(r, bib, lap) {
+  const res = resOf(r, bib), h = r.splits && r.splits[bib];
+  const inLap = h && h[lap + ':' + zoneLoc(r)];
+  if (inLap == null || !res) return null;
+  const start = lap > 1 ? res.lt && res.lt[lap - 2] : 0;
+  return start == null ? null : start + inLap;
+}
+// The leader's time at the zone checkpoint on a lap: the earliest time anyone passed it on that lap.
+function leaderZoneTime(r, lap) {
+  let best = null;
+  for (const x of r.riders) { const t = zoneTime(r, x.bib, lap); if (t != null && (best == null || t < best)) best = t; }
+  return best;
+}
+
+// Time behind the leader at the 80% zone. The official's timer starts when the leader passes the zone:
+// - riders who have reached checkpoint 13 on that lap are through: their gap is their time at checkpoint 13 minus
+//   the leader's (or, if that split was missed, their gap at the line);
 // - riders not through yet are at least as far behind as the timer shows, so the timer counts for them.
 // Without a timer (before the leader's first pass) the live timing gap is used.
 function behindOf(r, bib) {
   if (!racing(r, bib)) return null;
   const res = resOf(r, bib), t = r.timer, R = r.results;
   if (!t) return res.gap == null ? null : { ms: res.gap, from: 'timing' };
-  if (t.lap && res.done >= t.lap) {
-    const at = res.lt && res.lt[t.lap - 1], lead = R.leaderAt && R.leaderAt[t.lap];
-    return { ms: at != null && lead != null ? at - lead : res.gap, from: 'through' };
+  if (t.lap && pastZone(r, res, t.lap)) {
+    const at = zoneTime(r, bib, t.lap), lead = leaderZoneTime(r, t.lap);
+    if (at != null && lead != null) return { ms: at - lead, from: 'zone' };
+    const lt = res.lt && res.lt[t.lap - 1], ll = R.leaderAt && R.leaderAt[t.lap];
+    return lt != null && ll != null ? { ms: lt - ll, from: 'through' } : { ms: res.gap, from: 'timing' };
   }
   const el = Date.now() - Date.parse(t.at);
   return el >= (res.gap || 0) ? { ms: el, from: 'timer' } : { ms: res.gap, from: 'timing' };
 }
-// Lapped: the leader has come through the zone again (timer restarted) and this rider still hasn't come through
-// since the previous pass, i.e. they are still on an earlier lap than the one the leader was finishing. They pulse
-// until they reach the line (they have then come past the zone) or are marked pulled.
+// Lapped: the leader has come through the zone again (timer restarted) and this rider hasn't reached the zone
+// checkpoint since the previous pass, i.e. not even on the previous lap. They pulse until they reach checkpoint 13
+// (they are then at the zone) or are marked pulled.
 function lappedOf(r, bib) {
   const t = r.timer, res = resOf(r, bib);
-  return !!(t && t.lap && t.passes > 1 && racing(r, bib) && res.lap < t.lap);
+  return !!(t && t.lap && t.passes > 1 && racing(r, bib) && !pastZone(r, res, t.lap - 1));
 }
 function riskOf(r, bib) {
   const b = behindOf(r, bib), cut = cutOf(r);
@@ -601,6 +625,7 @@ function renderRace() {
   if (!r) return renderHome();
   $('#title').textContent = raceTitle(r);
   $('#cutLine').innerHTML = cutLineHtml(r);
+  $('#zoneLocV').textContent = zoneLoc(r);
   $('#liveNote').innerHTML = liveNoteHtml(r);
   renderClock();
   const q = $('#search').value.trim().toLowerCase();
@@ -644,7 +669,7 @@ function gapHtml(r, bib) {
   const b = behindOf(r, bib), cut = cutOf(r);
   if (!b) return '';
   if (!b.ms) return 'Leader';
-  const note = { timer: 'not through · timer', through: 'through zone', timing: 'timing gap' }[b.from];
+  const note = { timer: 'not through · timer', zone: `at zone · ck ${zoneLoc(r)}`, through: 'through · line gap', timing: 'timing gap' }[b.from];
   const pct = cut ? `${Math.round(b.ms / cut * 100)}% · ` : '';
   return `${riskOf(r, bib) === 'over' ? '<span class="pull">PULL</span>' : ''}+${fmtDur(b.ms)}<span class="pct">${pct}${note}</span>`;
 }
@@ -980,6 +1005,15 @@ $('#filterSeg').onclick = e => {
   renderRace();
 };
 $('#moreBtn').onclick = () => $('#moreTools').classList.toggle('hidden');
+$('#zoneBtn').onclick = () => {
+  const r = races[currentId];
+  const ans = prompt('Timing checkpoint closest to the 80% zone (the app shows each rider\'s checkpoint as e.g. 8/14):', zoneLoc(r));
+  if (ans === null) return;
+  if (!/^\d+$/.test(ans.trim()) || +ans.trim() < 1) { toast('Enter a checkpoint number, e.g. 13'); return; }
+  if (+ans.trim() === ZONE_LOC) delete r.zoneLoc; else r.zoneLoc = +ans.trim();
+  saveRaces(); renderRace();
+  toast(`80% zone set to checkpoint ${zoneLoc(r)}`);
+};
 $('#timerResetBtn').onclick = () => {
   const r = races[currentId];
   if (!r.timer || !confirm('Reset the 80% timer?')) return;
@@ -1005,7 +1039,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 5;
+const APP_VERSION = 6;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
