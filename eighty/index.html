@@ -953,6 +953,14 @@ function togglePulled(bib) {
 // There is no timing point at the 80% zone, so the official taps "Leader through" as the leader passes. The clock
 // then runs from that moment; it turns yellow at 50% of the pull time, red at 75%, and says PULL past the pull time.
 // Each new pass restarts it. The start is saved, so the clock survives closing the app.
+// True once every rider still racing (not pulled, not -80%/DNF/DNS) has passed the zone checkpoint on the lap of
+// the latest Leader through tap. Needs live timing and the lap of that tap.
+function allThrough(r) {
+  const t = r.timer;
+  if (!t || !t.lap || !r.results) return false;
+  const on = r.riders.filter(x => racing(r, x.bib));
+  return on.length > 0 && on.every(x => pastZone(r, resOf(r, x.bib), t.lap));
+}
 function renderClock() {
   const r = races[currentId];
   if (!r) return;
@@ -964,6 +972,13 @@ function renderClock() {
     const done = r.results && r.results.status === 'Finished';
     $('#clockT').textContent = done ? 'Race finished' : '0:00';
     $('#clockS').textContent = done ? 'Timer stopped: no more pulls' : 'Tap Leader through when the leader passes the 80% zone';
+    return;
+  }
+  // Everyone still racing has passed checkpoint 13 on this lap: nothing left to watch until the leader comes round.
+  if (allThrough(r)) {
+    clock.className = 'clock';
+    $('#clockT').textContent = `All through · lap ${t.lap}`;
+    $('#clockS').textContent = `Every rider still racing has passed checkpoint ${zoneLoc(r)} · waiting for the leader's next pass`;
     return;
   }
   const el = Date.now() - Date.parse(t.at);
@@ -1311,7 +1326,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 16;
+const APP_VERSION = 17;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
