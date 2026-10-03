@@ -233,8 +233,8 @@ table.sl tr.zone-div b { margin-right: 18px; }
   </table>
   <p class="footer-note">Riders are sorted by live position from every timing point around the course. Tap <b>Leader through</b> each
     time the leader passes the 80% zone (about timing checkpoint 13): riders who haven't reached checkpoint 13 yet are as far behind
-    as the timer; riders past it show their gap at checkpoint 13. <b>Live gap</b> follows timing round the course, with ▲ time lost or ▼ gained since checkpoint 13. Yellow: past 50% of the pull time.
-    Red: past 75%. PULL: past the pull time. Orange: losing more time than on their previous lap (crash or mechanical?). Pulsing blue: lapped, not at checkpoint 13 since your
+    as the timer; riders past it show their gap at checkpoint 13. <b>Live gap</b> follows timing round the course, with ▲ time lost or ▼ gained since checkpoint 13. Yellow: past 50% of the leader's first lap.
+    Red: past 75%. PULL: past 80% (the pull time). Orange: losing more time than on their previous lap (crash or mechanical?). Pulsing blue: lapped, not at checkpoint 13 since your
     previous Leader through tap, so look for them.
     Under each name: expected arrival at the 80% zone from the rider's earlier laps and current pace. <b>Pulled</b> only changes how a rider is shown.</p>
 </section>
@@ -472,14 +472,18 @@ function parseDur(s) {
 
 /* ---------- Pull time and highlights ---------- */
 // Theoretical pull time: 80% of the leader's first lap. It can be set by hand (often needed in short track).
-// Riders are highlighted by their time behind the leader as a share of the pull time.
-const WATCH = 0.5, ALERT = 0.75;
+// Riders are highlighted by their time behind the leader as a share of the leader's first lap: yellow from 50%,
+// red from 75%, PULL from 80% (the pull time). With a pull time set by hand, the lap it implies (pull time / 0.8) is used.
+const WATCH = 0.5, ALERT = 0.75, PULL = 0.8;
 function autoCut(r) {
   const l1 = r.results && r.results.leaderLap1;
   return l1 ? Math.round(l1 * 0.8) : null;
 }
 function cutOf(r) { return r.cutOverride || autoCut(r); }
-function level(share) { return share == null ? null : share >= 1 ? 'over' : share >= ALERT ? 'alert' : share >= WATCH ? 'watch' : null; }
+// The reference lap the percentages are measured against.
+function baseOf(r) { const c = cutOf(r); return c ? c / PULL : null; }
+// share: time behind as a fraction of the reference lap.
+function level(share) { return share == null ? null : share >= PULL ? 'over' : share >= ALERT ? 'alert' : share >= WATCH ? 'watch' : null; }
 function isPulled(r, bib) { return !!(r.pulled && r.pulled[bib]); }
 function racing(r, bib) {
   const res = resOf(r, bib);
@@ -561,7 +565,7 @@ function lappedOf(r, bib) {
 }
 function riskOf(r, bib) {
   const b = behindOf(r, bib), cut = cutOf(r);
-  return b && b.ms && cut ? level(b.ms / cut) : null;
+  return b && b.ms && cut ? level(b.ms / baseOf(r)) : null;
 }
 
 // Orange: a rider losing more time than on their own previous lap, e.g. a crash or a mechanical.
@@ -660,7 +664,8 @@ function cutLineHtml(r) {
     ? `set by hand${l1 ? ` · 80% of lap 1 would be ${fmtDur(Math.round(l1 * 0.8))}` : ''}`
     : `80% of the leader's first lap (${fmtDur(l1)})`;
   return `<span>Pull time</span><span class="cut">+${fmtDur(cut)}</span><span class="why">${esc(why)}</span>${change}
-    <span class="key watch">Yellow +${fmtDur(cut * WATCH)}</span><span class="key alert">Red +${fmtDur(cut * ALERT)}</span>`;
+    <span class="key watch">Yellow 50% +${fmtDur(baseOf(r) * WATCH)}</span><span class="key alert">Red 75% +${fmtDur(baseOf(r) * ALERT)}</span>
+    <span class="key over">Pull 80% +${fmtDur(cut)}</span>`;
 }
 
 function onWatch(r, bib) { return !!(riskOf(r, bib) || lossOf(r, bib) || lappedOf(r, bib)); }
@@ -779,7 +784,7 @@ function gapHtml(r, bib) {
   if (!b) return '';
   if (!b.ms && b.from !== 'timer') return 'Leader';
   const note = { timer: 'not at 13 · timer', zone: `at ck ${zoneLoc(r)}${b.lap ? ' · lap ' + b.lap : ''}`, timing: 'timing gap' }[b.from];
-  const pct = cut ? `${Math.round(b.ms / cut * 100)}% · ` : '';
+  const pct = cut ? `${Math.round(b.ms / baseOf(r) * 100)}% of lap 1 · ` : '';
   return `${riskOf(r, bib) === 'over' ? '<span class="pull">PULL</span>' : ''}+${fmtDur(b.ms)}<span class="pct">${pct}${note}</span>`;
 }
 // "Live gap" column: the gap at the rider's latest timing point around the course, and how much they have gained (▼)
@@ -845,7 +850,7 @@ function renderClock() {
     return;
   }
   const el = Date.now() - Date.parse(t.at);
-  const lv = cut ? level(el / cut) : null;
+  const lv = cut ? level(el / baseOf(r)) : null;
   clock.className = 'clock' + (lv ? ' ' + lv : '');
   $('#clockT').textContent = fmtDur(el) + (lv === 'over' ? '  PULL' : '');
   $('#clockS').textContent = `Leader pass ${t.passes} at ${fmtTime(t.at, true)}`
@@ -1166,7 +1171,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 8;
+const APP_VERSION = 9;
 $('#appVersion').textContent = `80% Zone version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
