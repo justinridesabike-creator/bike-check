@@ -482,7 +482,7 @@ function snapshot(d) {
   for (const x of d.Results || []) {
     const prev = res[x.RaceNr];
     if (prev && (prev.run || 0) > (x.Run || 0)) continue;
-    res[x.RaceNr] = { run: x.Run, pos: x.Position, st: x.Status || '', time: x.RaceTime, inRes: x.InResult, sp: splitsOf(x), spPos: (x.Times || []).map(p => (p && p.Position) || null), spGap: (x.Times || []).map(p => (p && p.TimeGap != null) ? p.TimeGap : null) };
+    res[x.RaceNr] = { run: x.Run, pos: x.Position, st: x.Status || '', time: x.RaceTime, inRes: x.InResult, sp: splitsOf(x), spPos: (x.Times || []).map(p => (p && p.Position) || null), spGap: (x.Times || []).map(p => (p && p.TimeGap != null) ? p.TimeGap : null), est: x.ExpectedStartTime || null };
   }
   const nrOf = e => (e && typeof e === 'object') ? (e.RaceNr ?? e.Bib ?? e.Nr) : e;
   const onTrack = (d.OnTrack || []).map(nrOf).filter(x => x != null);
@@ -495,6 +495,15 @@ function snapshot(d) {
   const next = (d.NextToStart || []).map(nrOf).filter(x => x != null);
   return { at: Date.now(), riders, res, onTrack, next };
 }
+// Milliseconds since midnight at the venue (ExpectedStartTime in the feed is venue local time).
+const EVENT_TZ = 'America/New_York';
+function eventMsOfDay() {
+  try {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: EVENT_TZ, hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      .formatToParts(new Date()).map(x => [x.type, x.value]));
+    return ((+p.hour % 24) * 3600 + +p.minute * 60 + +p.second) * 1000;
+  } catch (e) { return 0; }
+}
 // Elapsed time at each timing point (the last one is the finish); null where missing.
 function splitsOf(x) { const t = (x.Times || []).map(p => (p && p.RaceTime) || null); while (t.length && t[t.length - 1] == null) t.pop(); return t; }
 function statusOf(snap, nr) {
@@ -502,6 +511,13 @@ function statusOf(snap, nr) {
   if (x && OUT_RE.test(x.st)) return { k: 'out', label: x.st.toUpperCase().match(OUT_RE)[0] };
   if (x && x.pos > 0 && (/finish/i.test(x.st) || x.inRes)) return { k: 'fin', pos: x.pos, time: x.time };
   if (snap.onTrack.includes(nr) || (x && x.sp && x.sp.length)) return { k: 'track' };
+  // "NA" (not started) becomes DNS once a later starter has gone, or 10 min after the scheduled start (event local time).
+  if (x && /^NA$/i.test(x.st) && !snap.onTrack.includes(nr)) {
+    const me = snap.riders.find(r => r.nr === nr), so = me ? me.so : null;
+    const laterGone = so != null && snap.riders.some(r => r.so > so && snap.res[r.nr] && snap.res[r.nr].st && !/^NA$/i.test(snap.res[r.nr].st));
+    if (laterGone || (x.est && eventMsOfDay() > x.est + 600000)) return { k: 'out', label: 'DNS' };
+    return { k: 'tocome' };
+  }
   // Live feed: "NA" = not started yet, "InRace" = on track (with the splits done so far), then Finished/DNF/DSQ/DNS.
   if (x && /inrace|running|ontrack|on track/i.test(x.st)) return { k: 'track', label: x.st };
   return { k: 'tocome' };
@@ -1236,7 +1252,7 @@ setInterval(() => {
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 15;
+const APP_VERSION = 16;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
