@@ -100,6 +100,7 @@ td.today { white-space: nowrap; }
 .tag.out { background: var(--dnf); color: #fff; }
 .tag.tocome { background: transparent; border: 1px solid var(--line); color: var(--muted); }
 .pts { font-weight: 800; font-variant-numeric: tabular-nums; }
+.pts.pred { color: var(--muted); }
 .range { display: block; font-size: 11px; color: var(--muted); font-weight: 600; }
 tr.inrace td { background: var(--today); }
 tr.leader td.tot { color: var(--gold); }
@@ -162,7 +163,8 @@ td.need .ok { color: var(--ok); font-weight: 800; }
     <div class="row1">
       <h2 id="catTitle"></h2><span id="catState"></span>
       <span class="spacer"></span>
-      <div class="seg" id="tabSeg"><button data-t="standings" class="on">Standings</button><button data-t="podium">Podium</button><button data-t="race">Today's final</button></div>
+      <div class="seg" id="modeSeg"><button data-m="now">Now</button><button data-m="proj">Projected</button></div>
+      <div class="seg" id="tabSeg"><button data-t="standings" class="on">Standings</button><button data-t="podium">Podium</button><button data-t="race">Final</button></div>
     </div>
     <div class="sub" id="catSub"></div>
   </div>
@@ -193,8 +195,11 @@ td.need .ok { color: var(--ok); font-weight: 800; }
   </section>
   <section>
     <h2>Live timing</h2>
-    <p>ChronoRace event and the key of each final.</p>
+    <p>ChronoRace event, the key of each final, and the key of each qualifying (the base for predicted final times).</p>
     <div class="keys" id="keyInputs"></div>
+    <div class="keys" id="qkeyInputs" style="margin-top:10px"></div>
+    <div class="keys" style="margin-top:10px"><label>Final faster than qualifying by <input type="text" id="gainIn" inputmode="decimal"> %</label></div>
+    <p>2026 season: final 1–3% faster than qualifying in normal conditions (median rider; the fastest riders 2.5–4%).</p>
     <div class="btns"><button class="btn" id="saveKeys">Save timing</button></div>
   </section>
 </section>
@@ -209,10 +214,11 @@ function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;'
 
 /* ---------- Categories and storage ---------- */
 const CATS = [
-  { id: 'ME', name: 'Men Elite', scale: 'elite', key: '3' },
-  { id: 'WE', name: 'Women Elite', scale: 'elite', key: '6' },
-  { id: 'MJ', name: 'Men Junior', scale: 'junior', key: '8' },
-  { id: 'WJ', name: 'Women Junior', scale: 'junior', key: '10' },
+  // key: final, qkey: qualifying; field: riders in the final (2026 rounds), used until the final's start list is out.
+  { id: 'ME', name: 'Men Elite', scale: 'elite', key: '3', qkey: '2', field: 30 },
+  { id: 'WE', name: 'Women Elite', scale: 'elite', key: '6', qkey: '5', field: 15 },
+  { id: 'MJ', name: 'Men Junior', scale: 'junior', key: '8', qkey: '7', field: 20 },
+  { id: 'WJ', name: 'Women Junior', scale: 'junior', key: '10', qkey: '9', field: 10 },
 ];
 const CAT = Object.fromEntries(CATS.map(c => [c.id, c]));
 const STORE_KEY = 'standings.v1';
@@ -227,6 +233,7 @@ const DEFAULT_POINTS = {
 const DEFAULT_STD = {"ME":[{"rank":1,"name":"VERMETTE Asa","nat":"USA","pts":1347,"team":"FRAMEWORKS RACING / TRP"},{"rank":2,"name":"WILLIAMS Jordan","nat":"GBR","pts":1251,"team":"SPECIALIZED GRAVITY"},{"rank":3,"name":"PIERRON Amaury","nat":"FRA","pts":1173,"team":"COMMENCAL/MUC-OFF BY RIDING"},{"rank":4,"name":"ALRAN Max","nat":"FRA","pts":1025,"team":"COMMENCAL/MUC-OFF BY RIDING"},{"rank":5,"name":"ILES Finn","nat":"CAN","pts":985,"team":"SPECIALIZED GRAVITY"},{"rank":6,"name":"PINKERTON Ryan","nat":"USA","pts":879,"team":"MONDRAKER FACTORY RACING DH"},{"rank":7,"name":"GOLDSTONE Jackson","nat":"CAN","pts":836,"team":"SANTA CRUZ SYNDICATE"},{"rank":8,"name":"BROSNAN Troy","nat":"AUS","pts":779,"team":"CANYON DH RACING"},{"rank":9,"name":"ALRAN Till","nat":"FRA","pts":775,"team":"COMMENCAL/MUC-OFF BY RIDING"},{"rank":10,"name":"SHAW Luca","nat":"USA","pts":756,"team":"CANYON DH RACING"},{"rank":11,"name":"VERGIER Loris","nat":"FRA","pts":753,"team":"COMMENCAL/MUC-OFF BY RIDING"},{"rank":12,"name":"KOLB Andreas","nat":"AUT","pts":652,"team":"SANTA CRUZ SYNDICATE"},{"rank":13,"name":"COULANGES Benoit","nat":"FRA","pts":587,"team":"SCOTT DOWNHILL FACTORY"},{"rank":14,"name":"KIEFER Henri","nat":"GER","pts":538,"team":"CANYON DH RACING"},{"rank":15,"name":"PIERRON Antoine","nat":"FRA","pts":533,"team":"COMMENCAL SCHWALBE BY LES"},{"rank":16,"name":"MEIER-SMITH Luke","nat":"AUS","pts":532,"team":"GIANT FACTORY OFF-ROAD TEAM - DH"},{"rank":17,"name":"MAPLES Dylan","nat":"USA","pts":510,"team":"PIVOT FACTORY RACING"},{"rank":18,"name":"RUDE JR Richard","nat":"USA","pts":501,"team":"YETI / FOX FACTORY RACE TEAM"},{"rank":19,"name":"PONTVIANNE Nathan","nat":"FRA","pts":497,"team":"SANTA CRUZ BURGTEC BY GOODMAN"},{"rank":20,"name":"CRAIK Ethan","nat":"GBR","pts":463,"team":"SCOTT DOWNHILL FACTORY"},{"rank":21,"name":"WILSON Reece","nat":"GBR","pts":438,"team":"AON RACING"},{"rank":22,"name":"WAITE Tyler","nat":"NZL","pts":375,"team":"YETI / FOX FACTORY RACE TEAM"},{"rank":23,"name":"MAES Martin","nat":"BEL","pts":366,"team":"ORBEA FMD RACING"},{"rank":24,"name":"WAYMAN Luke","nat":"NZL","pts":359,"team":"CONTINENTAL ATHERTON"},{"rank":25,"name":"DAVIS Oliver","nat":"AUS","pts":350,"team":"TREK - UNBROKEN DH"},{"rank":26,"name":"STEVENS-MCNAB Lachlan","nat":"NZL","pts":342,"team":"TREK - UNBROKEN DH"},{"rank":27,"name":"KUHN Bodhi","nat":"CAN","pts":302,"team":"NORCO X ADIDAS RACE DIVISION"},{"rank":28,"name":"SUAREZ ALONSO Angel","nat":"ESP","pts":274},{"rank":29,"name":"NORTON Dakotah","nat":"USA","pts":249,"team":"SCOTT DOWNHILL FACTORY"},{"rank":30,"name":"WALKER Matt","nat":"GBR","pts":239,"team":"TREK - UNBROKEN DH"},{"rank":31,"name":"BRUNI Loic","nat":"FRA","pts":230,"team":"SPECIALIZED GRAVITY"},{"rank":32,"name":"VIEIRA Roger","nat":"BRA","pts":224,"team":"PIVOT FACTORY RACING"},{"rank":33,"name":"HATTON Charlie","nat":"GBR","pts":223,"team":"CONTINENTAL ATHERTON"},{"rank":34,"name":"MADLEY George","nat":"GBR","pts":212,"team":"TEAM HIGH COUNTRY"},{"rank":35,"name":"BURKE Bode","nat":"USA","pts":201,"team":"CRESTLINE SPEED SHOP"},{"rank":36,"name":"GWIN Aaron","nat":"USA","pts":184,"team":"FRAMEWORKS RACING / TRP"},{"rank":37,"name":"INTROZZI Stefano","nat":"ITA","pts":180},{"rank":38,"name":"O CALLAGHAN Oisin","nat":"IRL","pts":174,"team":"TREK - UNBROKEN DH"},{"rank":39,"name":"PENE Tuhoto-Ariki","nat":"NZL","pts":153,"team":"MS-RACING"},{"rank":40,"name":"JEWETT Jakob","nat":"CAN","pts":140,"team":"GIANT FACTORY OFF-ROAD TEAM - DH"},{"rank":41,"name":"HART Danny","nat":"GBR","pts":139,"team":"NORCO X ADIDAS RACE DIVISION"},{"rank":42,"name":"ROGGE Antoine","nat":"FRA","pts":131},{"rank":43,"name":"DELESALLE Michael","nat":"CAN","pts":116,"team":"FRAMEWORKS RACING / TRP"},{"rank":44,"name":"KERR Bernard","nat":"GBR","pts":113,"team":"PIVOT FACTORY RACING"},{"rank":45,"name":"REVELLI Loris","nat":"ITA","pts":100},{"rank":46,"name":"MEDCALF Evan","nat":"USA","pts":95,"team":"COMMENCAL SCHWALBE BY LES"},{"rank":47,"name":"BREEDEN Joe","nat":"GBR","pts":78,"team":"NUKEPROOF AXESS RACING"},{"rank":48,"name":"CLARK Oli","nat":"NZL","pts":75,"team":"MONDRAKER FACTORY RACING DH"},{"rank":49,"name":"HELLY Johnathan","nat":"CAN","pts":63},{"rank":50,"name":"MUÑOZ Juan","nat":"COL","pts":63,"team":"NUKEPROOF AXESS RACING"},{"rank":51,"name":"CHAPELET Simon","nat":"FRA","pts":51,"team":"UNNO FACTORY RACING DH"},{"rank":52,"name":"PATE Alden","nat":"USA","pts":48,"team":"CRESTLINE SPEED SHOP"},{"rank":53,"name":"GARCIN Johan","nat":"FRA","pts":44},{"rank":54,"name":"JEWETT Dane","nat":"CAN","pts":38,"team":"GIANT FACTORY OFF-ROAD TEAM - DH"},{"rank":55,"name":"CONNELLY Jackson","nat":"AUS","pts":34,"team":"THE ALLIANCE"},{"rank":56,"name":"ZWAR Oliver","nat":"SWE","pts":34,"team":"ORBEA FMD RACING"},{"rank":57,"name":"DUNNE Ronan","nat":"IRL","pts":32,"team":"MONDRAKER FACTORY RACING DH"},{"rank":58,"name":"KERR Henry","nat":"IRL","pts":32,"team":"AON RACING"},{"rank":59,"name":"DAPRELA Thibaut","nat":"FRA","pts":16},{"rank":60,"name":"THIRION Rémi","nat":"FRA","pts":5,"team":"GIANT FACTORY OFF-ROAD TEAM - DH"}],"WE":[{"rank":1,"name":"HÖLL Valentina","nat":"AUT","pts":2010,"team":"COMMENCAL SCHWALBE BY LES ORRES"},{"rank":2,"name":"SCARSI Gloria","nat":"ITA","pts":1053,"team":"MS-RACING"},{"rank":3,"name":"HARNDEN Harriet","nat":"GBR","pts":1045,"team":"AON RACING"},{"rank":4,"name":"HEMSTREET Gracey","nat":"CAN","pts":1040,"team":"NORCO X ADIDAS RACE DIVISION"},{"rank":5,"name":"BAUMANN Lisa","nat":"SUI","pts":991,"team":"COMMENCAL SCHWALBE BY LES ORRES"},{"rank":6,"name":"NEWKIRK Anna","nat":"USA","pts":968,"team":"FRAMEWORKS RACING / TRP"},{"rank":7,"name":"CABIROU Marine","nat":"FRA","pts":871,"team":"CANYON DH RACING"},{"rank":8,"name":"NICOLE Myriam","nat":"FRA","pts":781,"team":"COMMENCAL/MUC-OFF BY RIDING"},{"rank":9,"name":"EARNEST Sacha","nat":"NZL","pts":750,"team":"TREK - UNBROKEN DH"},{"rank":10,"name":"BOULADOU Lisa","nat":"FRA","pts":598,"team":"SANTA CRUZ BURGTEC BY GOODMAN"},{"rank":11,"name":"ROA SANCHEZ Valentina","nat":"COL","pts":517,"team":"MS-RACING"},{"rank":12,"name":"HULSEBOSCH Eliana","nat":"NZL","pts":476,"team":"SANTA CRUZ SYNDICATE"},{"rank":13,"name":"HOFFMANN Nina","nat":"GER","pts":472,"team":"SANTA CRUZ SYNDICATE"},{"rank":14,"name":"HASTINGS Jenna","nat":"NZL","pts":353,"team":"PIVOT FACTORY RACING"},{"rank":15,"name":"BLEWITT Jess","nat":"NZL","pts":342,"team":"SCOTT DOWNHILL FACTORY"},{"rank":16,"name":"SEAGRAVE Tahnee","nat":"GBR","pts":285,"team":"ORBEA FMD RACING"},{"rank":17,"name":"GALE Phoebe","nat":"GBR","pts":276,"team":"ORBEA FMD RACING"},{"rank":18,"name":"WIDMANN Veronika","nat":"ITA","pts":165,"team":"UNNO FACTORY RACING DH"},{"rank":19,"name":"HASTINGS Kate","nat":"NZL","pts":134,"team":"TEAM HIGH COUNTRY"},{"rank":20,"name":"MELTON Matilda","nat":"USA","pts":121,"team":"YETI / FOX FACTORY RACE TEAM"},{"rank":21,"name":"RØNNING Frida Helena","nat":"NOR","pts":84,"team":"CRESTLINE SPEED SHOP"},{"rank":22,"name":"BONNAURE Lais","nat":"FRA","pts":35},{"rank":23,"name":"JOHNSET Mille","nat":"NOR","pts":35,"team":"NUKEPROOF AXESS RACING"}],"MJ":[{"rank":1,"name":"WILLIAMSON Jonty","nat":"NZL","pts":369,"team":"YETI / FOX FACTORY RACE TEAM"},{"rank":2,"name":"BOATWRIGHT Malik","nat":"NZL","pts":255,"team":"CONTINENTAL ATHERTON"},{"rank":3,"name":"BRIZIN Sacha Gabriel","nat":"FRA","pts":224,"team":"COMMENCAL SCHWALBE BY LES"},{"rank":4,"name":"RUTHERFURD Camden","nat":"NZL","pts":202,"team":"NUKEPROOF AXESS RACING"},{"rank":5,"name":"HICKMAN Kasper","nat":"FIN","pts":195,"team":"CUBE FACTORY RACING"},{"rank":6,"name":"SCHNEEBERGER Raoul","nat":"SUI","pts":185,"team":"SANTA CRUZ BURGTEC BY"},{"rank":7,"name":"NISBET Stan","nat":"GBR","pts":162,"team":"AON RACING"},{"rank":8,"name":"WILSON Ryder","nat":"CAN","pts":151,"team":"TEAM HIGH COUNTRY"},{"rank":9,"name":"GRIFFITHS Felix","nat":"GBR","pts":145,"team":"SANTA CRUZ SYNDICATE"},{"rank":10,"name":"FORLIN Noé","nat":"SUI","pts":139},{"rank":11,"name":"KALINŠEK Ažbe","nat":"SLO","pts":123},{"rank":12,"name":"ELLER Lois","nat":"GER","pts":120},{"rank":13,"name":"MALLEN Luke","nat":"USA","pts":103,"team":"OUTLAW INTENSE RACING"},{"rank":14,"name":"BINSBERGEN Seppy","nat":"NZL","pts":98},{"rank":15,"name":"GILARDINO Filippo","nat":"ITA","pts":90},{"rank":16,"name":"BRYANT Boston","nat":"USA","pts":87,"team":"OUTLAW INTENSE RACING"},{"rank":17,"name":"BRUNO Thomas","nat":"ITA","pts":83,"team":"MS-RACING"},{"rank":18,"name":"MALLEN Alex","nat":"USA","pts":82,"team":"OUTLAW INTENSE RACING"},{"rank":19,"name":"NÄF Yanis","nat":"SUI","pts":80},{"rank":20,"name":"STEVENS-MCNAB Sterling","nat":"NZL","pts":76,"team":"THE ALLIANCE"},{"rank":21,"name":"GRIP HAGLEV Nicolai","nat":"NOR","pts":69},{"rank":22,"name":"DE VALL Landon","nat":"CAN","pts":59,"team":"STOIC RACING"},{"rank":23,"name":"WELLINGS Rhys","nat":"AUS","pts":59},{"rank":24,"name":"VAN DUYSE Briek","nat":"BEL","pts":56},{"rank":25,"name":"SMITH Elliot","nat":"GBR","pts":45},{"rank":26,"name":"DE VAUX Nathan","nat":"GBR","pts":44},{"rank":27,"name":"CROSS Rowan","nat":"GBR","pts":40},{"rank":28,"name":"JURAS Šimun","nat":"CRO","pts":35},{"rank":29,"name":"WALKER Brodey","nat":"USA","pts":30,"team":"OUTLAW INTENSE RACING"},{"rank":30,"name":"TORRE MARTINEZ Enol","nat":"ESP","pts":30},{"rank":31,"name":"RYAN Darragh","nat":"IRL","pts":28,"team":"ORBEA FMD RACING"},{"rank":32,"name":"CAMINADA Nando","nat":"SUI","pts":26},{"rank":33,"name":"KUEGLER Jed","nat":"NZL","pts":24},{"rank":34,"name":"MCCREDIE Jack","nat":"CAN","pts":23,"team":"FRAMEWORKS RACING / TRP"},{"rank":35,"name":"BERGEN Lenn","nat":"GER","pts":20},{"rank":36,"name":"SUMNER Sebastian","nat":"GBR","pts":20},{"rank":37,"name":"BURLESON Kai","nat":"USA","pts":20},{"rank":38,"name":"HOSPITAL SABATER Lluc","nat":"ESP","pts":18},{"rank":39,"name":"GAWLOWSKI Alex","nat":"POL","pts":17},{"rank":40,"name":"MILESI Samuel","nat":"FRA","pts":16},{"rank":41,"name":"LOCK Dexter","nat":"NZL","pts":14},{"rank":42,"name":"HOLLING Finn","nat":"GBR","pts":14},{"rank":43,"name":"MILLS Bailey","nat":"AUS","pts":14},{"rank":44,"name":"HULSEBOSCH Cole","nat":"NZL","pts":12,"team":"ORBEA FMD RACING"},{"rank":45,"name":"OSTFELD Yahav","nat":"ISR","pts":12},{"rank":46,"name":"BARRACHINA NAVARRO","nat":"ESP","pts":12},{"rank":47,"name":"GODIN Léo","nat":"FRA","pts":10},{"rank":48,"name":"COUZIN Bryn","nat":"AUS","pts":10},{"rank":49,"name":"KLAUSMANN Levin","nat":"GER","pts":9},{"rank":50,"name":"COLTHUP Oliver","nat":"AUS","pts":9},{"rank":51,"name":"GAINEY Slade","nat":"USA","pts":9},{"rank":52,"name":"MILNER Noah","nat":"CAN","pts":8},{"rank":53,"name":"VATH Rhys","nat":"CAN","pts":7}],"WJ":[{"rank":1,"name":"OSTGAARD Aletha","nat":"USA","pts":445,"team":"CANYON DH RACING"},{"rank":2,"name":"FRENER Lina","nat":"AUT","pts":315,"team":"NORCO X ADIDAS RACE DIVISION"},{"rank":3,"name":"JENSEN Rosa Marie","nat":"DEN","pts":295,"team":"SPECIALIZED GRAVITY"},{"rank":4,"name":"NEF Gianna","nat":"SUI","pts":210},{"rank":5,"name":"PEIZERAT Cassandre","nat":"FRA","pts":180,"team":"COMMENCAL/MUC-OFF BY RIDING"},{"rank":6,"name":"DEAVOLL Indy","nat":"NZL","pts":180,"team":"STOIC RACING"},{"rank":7,"name":"BOADLE Tilly","nat":"AUS","pts":155,"team":"COMMENCAL SCHWALBE BY LES"},{"rank":8,"name":"PROULX-ROYDS Tayte","nat":"CAN","pts":150},{"rank":9,"name":"ZIERL Rosa","nat":"AUT","pts":110,"team":"CUBE FACTORY RACING"},{"rank":10,"name":"LOGAR Raina","nat":"USA","pts":90,"team":"FRAMEWORKS RACING / TRP"},{"rank":11,"name":"CHAUMET LAGRANGE Ava","nat":"FRA","pts":80},{"rank":12,"name":"LOGAR Zanna","nat":"USA","pts":65,"team":"FRAMEWORKS RACING / TRP"},{"rank":13,"name":"PORRAS Samantha","nat":"USA","pts":60},{"rank":14,"name":"CRES CLEMENT Chloe","nat":"FRA","pts":30},{"rank":15,"name":"ROLDAN RAUE Rafaela","nat":"ECU","pts":25},{"rank":16,"name":"BRAGG Cameron","nat":"CAN","pts":25,"team":"STOIC RACING"},{"rank":17,"name":"BRUNO Rebecca","nat":"ITA","pts":25,"team":"MS-RACING"},{"rank":18,"name":"FAYOLLE Zoé","nat":"FRA","pts":20},{"rank":19,"name":"VLAAR Kiera","nat":"NZL","pts":15},{"rank":20,"name":"STEWART Kallie","nat":"USA","pts":10},{"rank":21,"name":"TOBIN Lilian","nat":"IRL","pts":10},{"rank":22,"name":"GRAATEN Piper","nat":"CAN","pts":5},{"rank":23,"name":"MORRISON Illy","nat":"GBR","pts":5,"team":"ORBEA FMD RACING"},{"rank":24,"name":"SALUZZO Lauryn","nat":"FRA","pts":5}]};
 function blank() {
   return { event: '20261002_mtb', keys: Object.fromEntries(CATS.map(c => [c.id, c.key])),
+    qkeys: Object.fromEntries(CATS.map(c => [c.id, c.qkey])), qsnaps: {}, gain: 2.5,
     points: JSON.parse(JSON.stringify(DEFAULT_POINTS)), standings: {}, snaps: {}, official: {} };
 }
 function load() {
@@ -484,15 +491,34 @@ async function poll(catId) {
     ls.nextAt = Date.now() + (ls.error ? 10000 : st === 'live' ? 3000 : (st === 'done' || st === 'official') ? 120000 : 10000);
   }
 }
+// Qualifying: the base for predicted final times. Checked every 2 min once in (20 s until then).
+const qlive = {};
+async function pollQ(catId) {
+  const ls = qlive[catId] || (qlive[catId] = { nextAt: 0 });
+  if (ls.busy) return;
+  ls.busy = true;
+  try {
+    const d = await crGet(`uci/dh/race/${S.event}/${S.qkeys[catId]}`);
+    ls.error = null;
+    if (d) {
+      const snap = snapshot(d), old = S.qsnaps[catId];
+      if (!old || (doneCount(snap) >= doneCount(old) && JSON.stringify(old.res) !== JSON.stringify(snap.res))) { S.qsnaps[catId] = snap; save(); renderSoon(); }
+    }
+  } catch (e) { ls.error = e.message; }
+  finally { ls.busy = false; ls.nextAt = Date.now() + (S.qsnaps[catId] ? 120000 : 20000); }
+}
 setInterval(() => {
   if (document.hidden) return;
-  for (const c of CATS) { const ls = live[c.id]; if (!ls || Date.now() >= ls.nextAt) poll(c.id); }
+  for (const c of CATS) {
+    const ls = live[c.id]; if (!ls || Date.now() >= ls.nextAt) poll(c.id);
+    const qs = qlive[c.id]; if (!qs || Date.now() >= qs.nextAt) pollQ(c.id);
+  }
 }, 1000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) CATS.forEach(c => poll(c.id)); });
 
 /* ---------- Standings maths ---------- */
 function compute(catId) {
-  const cat = CAT[catId], snap = S.snaps[catId], base = (S.standings[catId] || {}).rows || [];
+  const cat = CAT[catId], realSnap = S.snaps[catId], snap = realSnap || qField(catId), base = (S.standings[catId] || {}).rows || [];
   const rows = [], index = new Map();
   for (const b of base) {
     const r = { name: b.name, nat: b.nat, team: b.team, uci: b.uci, before: b.pts, startRank: b.rank, today: null };
@@ -504,7 +530,7 @@ function compute(catId) {
     for (const f of snap.riders) {
       let r = keysOf(f).map(k => index.get(k)).find(Boolean);
       if (!r) { r = { name: f.name, nat: f.nat, team: f.team, uci: f.uci, before: 0, startRank: null }; rows.push(r); keysOf(f).forEach(k => index.set(k, r)); }
-      r.uci = r.uci || f.uci; r.team = r.team || f.team; r.inRace = true; r.nr = f.nr; r.so = f.so;
+      r.uci = r.uci || f.uci; r.team = r.team || f.team; r.inRace = true; r.nr = f.nr; r.so = f.so; r.q2 = !!f.q2;
       r.today = statusOf(snap, f.nr);
       if (r.today.k === 'fin' || r.today.k === 'out') downCount++;
       else pending.push(r);
@@ -515,7 +541,7 @@ function compute(catId) {
     const t = r.today;
     r.pts = t && t.k === 'fin' ? ptsFor(catId, t.pos) : 0;
     r.total = r.before + r.pts;
-    r.cb = cbRec(catId, r, t && t.k === 'fin' ? t.pos : 0, r.pts, !!snap);
+    r.cb = cbRec(catId, r, t && t.k === 'fin' ? t.pos : 0, r.pts, !!realSnap);
     // Range still possible: finishers can only drop as many places as riders still to come; riders to come can win or score 0.
     if (!t || t.k === 'out') { r.min = r.max = r.total; }
     else if (t.k === 'fin') { r.max = r.total; r.min = r.before + ptsFor(catId, t.pos + n); }
@@ -532,7 +558,72 @@ function compute(catId) {
   // Title: who can still finish on top? The best guaranteed total sets the bar.
   const bar = Math.max(...rows.map(r => r.min), -Infinity);
   const contenders = rows.filter(r => r.max >= bar && rows.length);
-  return { rows, hot, pending, downCount, contenders, decided: contenders.length === 1 };
+  return { rows, hot, pending, downCount, contenders, decided: contenders.length === 1, snap };
+}
+
+/* ---------- Prediction: final times from qualifying ---------- */
+// Until the final's start list is out, the field is the fastest qualifiers (cat.field), starting slowest first.
+// Elite finals also take riders through Q2, which is not in the timing feed (2026: 1-7 riders a round, e.g. Vermette
+// from 78th in Q1), so for elites any top-30 series rider at this event is added as a possible Q2 qualifier.
+const qFieldCache = {};
+function qualified(q) {
+  return q.riders.map(r => ({ r, x: q.res[r.nr] })).filter(o => o.x && o.x.pos > 0 && o.x.time && (/finish/i.test(o.x.st) || o.x.inRes))
+    .sort((a, b) => a.x.time - b.x.time);
+}
+function qField(catId) {
+  const q = S.qsnaps && S.qsnaps[catId];
+  if (!q) return null;
+  const c = qFieldCache[catId];
+  if (c && c.q === q && c.std === S.standings[catId]) return c.snap;
+  const top = qualified(q).slice(0, CAT[catId].field), riders = top.map(o => o.r);
+  const std = S.standings[catId];
+  if (CAT[catId].scale === 'elite' && std) {
+    const seeded = new Set(), inField = new Set(riders.flatMap(keysOf));
+    std.rows.filter(r => r.rank <= 30).forEach(r => keysOf(r).forEach(k => seeded.add(k)));
+    for (const r of q.riders) {
+      const x = q.res[r.nr];
+      if (x && !/DNS/i.test(x.st) && keysOf(r).some(k => seeded.has(k)) && !keysOf(r).some(k => inField.has(k))) riders.push({ ...r, q2: true });
+    }
+  }
+  const snap = { at: q.at, riders: riders.map((r, i) => ({ ...r, so: riders.length - i })), res: {}, onTrack: [], fromQ: true };
+  qFieldCache[catId] = { q, snap, std };
+  return snap;
+}
+const qIdx = new WeakMap();
+function qTime(catId, r) {
+  const q = S.qsnaps && S.qsnaps[catId];
+  if (!q) return null;
+  let m = qIdx.get(q);
+  if (!m) { m = new Map(); for (const o of qualified(q)) keysOf(o.r).forEach(k => m.set(k, o.x.time)); qIdx.set(q, m); }
+  for (const k of keysOf(r)) if (m.has(k)) return m.get(k);
+  return null;
+}
+// Projected finish: actual time once down, else qualifying time minus S.gain %. Riders with no qualifying time go last.
+function project(catId, R) {
+  const gain = (+S.gain || 0) / 100, order = [];
+  for (const r of R.rows) {
+    r.ppos = 0; r.ptime = null; r.pred = false;
+    if (!r.today || r.today.k === 'out') continue;
+    if (r.today.k === 'fin') r.ptime = r.today.time;
+    else { const q = qTime(catId, r); r.ptime = q ? Math.round(q * (1 - gain)) : null; r.pred = true; }
+    order.push(r);
+  }
+  order.sort((a, b) => (a.ptime ?? 1e12) - (b.ptime ?? 1e12) || (a.today.pos || 1e6) - (b.today.pos || 1e6) || (a.so || 0) - (b.so || 0));
+  order.forEach((r, i) => { r.ppos = i + 1; });
+  for (const r of R.rows) {
+    r.ppts = r.ppos ? ptsFor(catId, r.ppos) : 0;
+    r.ptotal = r.before + r.ppts;
+    r.pcb = cbRec(catId, r, r.ppos, r.ppts, true);
+  }
+  const rows = R.rows.slice().sort((a, b) => b.ptotal - a.ptotal || cbCmp(a.pcb, b.pcb) || (a.startRank || 1e9) - (b.startRank || 1e9) || a.name.localeCompare(b.name));
+  let rank = 0;
+  rows.forEach((r, i) => { const p = rows[i - 1]; if (!p || r.ptotal !== p.ptotal || cbCmp(p.pcb, r.pcb)) rank = i + 1; r.prank = rank; });
+  const view = rows.map((r, i) => {
+    const p = rows[i - 1], n = rows[i + 1];
+    const tie = !!((p && p.prank === r.prank) || (n && n.prank === r.prank));
+    return { ...r, orig: r, rank: r.prank, total: r.ptotal, tie, cbSplit: !tie && !!((p && p.ptotal === r.ptotal) || (n && n.ptotal === r.ptotal)) };
+  });
+  return { order, view, predicted: order.filter(r => r.pred && r.ptime).length, hasQ: !!(S.qsnaps && S.qsnaps[catId]) };
 }
 
 /* ---------- Title scenarios (before and during the final) ---------- */
@@ -568,7 +659,7 @@ function scenarios(catId) {
 }
 
 /* ---------- Rendering ---------- */
-let view = 'home', curCat = null, tab = 'standings';
+let view = 'home', curCat = null, tab = 'standings', stdMode = 'proj';
 const prevRank = {};
 function stateBadge(catId) {
   const st = raceState(catId);
@@ -622,6 +713,8 @@ function renderCat() {
   $('#catTitle').textContent = cat.name;
   $('#catState').innerHTML = stateBadge(id);
   document.querySelectorAll('#tabSeg button').forEach(b => b.classList.toggle('on', b.dataset.t === tab));
+  document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('on', b.dataset.m === stdMode));
+  $('#modeSeg').classList.toggle('hidden', tab !== 'standings');
   updateSub();
   $('#catWarn').innerHTML = warnHtml([id]).replace('class="warn-box"', 'class="warn-box" style="margin:12px 16px 0"');
   $('#titleBox').innerHTML = tab === 'standings' ? titleHtml(id, R) : '';
@@ -668,42 +761,61 @@ function todayCell(r) {
   if (t.k === 'track') return `<span class="tag track">on track</span><span class="range">${r.min}–${r.max}</span>`;
   return `<span class="tag tocome">to come</span><span class="range">${r.min}–${r.max}</span>`;
 }
+function projCell(r) {
+  const t = r.today;
+  if (!t || t.k === 'out') return todayCell(r);
+  if (t.k === 'fin') return `<span class="tag fin">${ord(t.pos)}</span> <span class="pts">+${r.pts}</span>${r.ppos !== t.pos ? `<span class="range">projected ${ord(r.ppos)}, +${r.ppts}</span>` : ''}`;
+  const tag = t.k === 'track' ? '<span class="tag track">on track</span> ' : '';
+  if (!r.ptime) return `${tag}<span class="tag tocome">to come</span><span class="range">no qualifying time</span>`;
+  return `${tag}<span class="tag tocome">≈${ord(r.ppos)}</span> <span class="pts pred">+${r.ppts}</span><span class="range">pred. ${fmtMs(r.ptime)}</span>`;
+}
 function standingsHtml(id, R) {
-  const lead = R.rows[0], cset = new Set(R.contenders.length > 1 ? R.contenders : []);
+  const P = stdMode === 'proj' ? project(id, R) : null, proj = P && P.predicted > 0;
+  const rows = proj ? P.view : R.rows, cell = proj ? projCell : todayCell;
+  const lead = rows[0], cset = new Set(R.contenders.length > 1 ? R.contenders : []);
   const prov = raceState(id) !== 'official' && S.snaps[id];
-  const body = R.rows.map((r, i) => {
-    const key = keysOf(r)[0], pk = id + key, was = prevRank[pk];
+  const note = P && !proj ? `<p class="sub" style="padding:8px 16px">No predictions yet: ${P.hasQ ? 'every rider in the final is down.' : 'qualifying times not loaded.'} Showing current standings.</p>`
+    : proj ? `<p class="sub" style="padding:8px 16px">Projected: actual result once down, otherwise qualifying time −${S.gain}% (${P.predicted} riders predicted).</p>` : '';
+  const body = rows.map((r, i) => {
+    const key = keysOf(r)[0], pk = id + (proj ? 'p' : '') + key, was = prevRank[pk];
     const bump = was != null && was !== r.rank; prevRank[pk] = r.rank;
     const mv = r.startRank == null ? '<span class="n">new</span>' : r.startRank > r.rank ? `<span class="u">▲${r.startRank - r.rank}</span>`
       : r.startRank < r.rank ? `<span class="d">▼${r.rank - r.startRank}</span>` : '<span class="n">–</span>';
-    const ahead = i > 0 ? R.rows[i - 1] : null;
-    return `<tr class="${r.inRace ? 'inrace' : ''} ${i === 0 ? 'leader' : ''} ${cset.has(r) ? 'contender' : ''} ${bump ? 'bump' : ''}">
+    const ahead = i > 0 ? rows[i - 1] : null;
+    return `<tr class="${r.inRace ? 'inrace' : ''} ${i === 0 ? 'leader' : ''} ${cset.has(r.orig || r) ? 'contender' : ''} ${bump ? 'bump' : ''}">
       <td class="rk">${rankTxt(r)}</td><td class="mv">${mv}</td>
       <td><div class="nm">${esc(r.name)}</div><div class="team">${esc(r.team || '')}</div></td>
       <td>${esc(r.nat || '')}</td>
       <td class="num hide-sm">${r.before}</td>
-      <td class="today">${todayCell(r)}</td>
+      <td class="today">${cell(r)}</td>
       <td class="num tot">${r.total}</td>
       <td class="num">${i === 0 ? '' : '−' + (lead.total - r.total)}</td>
       <td class="num hide-md">${ahead ? '−' + (ahead.total - r.total) : ''}</td>
     </tr>`;
   }).join('');
-  return `<table class="st"><thead><tr><th class="num">Rank${prov ? ' <span class="prov">prov.</span>' : ''}</th><th>vs start</th><th>Rider / Team</th><th>Nat</th>
-    <th class="num hide-sm">Before</th><th>Today</th><th class="num">Total</th><th class="num">To leader</th><th class="num hide-md">To ahead</th></tr></thead>
+  return `${note}<table class="st"><thead><tr><th class="num">${proj ? 'Proj.' : `Rank${prov ? ' <span class="prov">prov.</span>' : ''}`}</th><th>vs start</th><th>Rider / Team</th><th>Nat</th>
+    <th class="num hide-sm">Before</th><th>${proj ? 'Today (projected)' : 'Today'}</th><th class="num">${proj ? 'Proj. total' : 'Total'}</th><th class="num">To leader</th><th class="num hide-md">To ahead</th></tr></thead>
     <tbody>${body || '<tr><td colspan="9" class="sub" style="padding:24px">No riders yet. Add standings in Setup, or wait for timing.</td></tr>'}</tbody></table>`;
 }
 function raceHtml(id, R) {
-  const cat = CAT[id], snap = S.snaps[id];
-  if (!snap) return `<p class="sub" style="padding:24px">Timing returns nothing until the final starts. Checking every 10 seconds.</p>`;
-  const best = R.hot[0] && R.hot[0].today.time;
-  const fin = R.hot.map(r => `<tr><td class="rk">${r.today.pos}</td><td><div class="nm">${esc(r.name)}</div><div class="team">${esc(r.team || '')}</div></td>
-    <td>${esc(r.nat || '')}</td><td class="num">${fmtMs(r.today.time)}</td><td class="num">${r.today.pos > 1 && best ? '+' + ((r.today.time - best) / 1000).toFixed(3) : ''}</td>
-    <td class="num tot">${r.pts}</td></tr>`).join('');
-  const rest = R.rows.filter(r => r.today && r.today.k !== 'fin').sort((a, b) => ({ track: 0, tocome: 1, out: 2 }[a.today.k] - { track: 0, tocome: 1, out: 2 }[b.today.k]) || (a.so || 0) - (b.so || 0))
-    .map(r => `<tr><td class="rk"></td><td><div class="nm">${esc(r.name)}</div><div class="team">${esc(r.team || '')}</div></td><td>${esc(r.nat || '')}</td>
-      <td colspan="2">${todayCell(r)}</td><td class="num">${r.today.k === 'out' ? 0 : ''}</td></tr>`).join('');
-  return `<table class="st"><thead><tr><th class="num">Pos</th><th>Rider</th><th>Nat</th><th class="num">Time</th><th class="num">Gap</th><th class="num">Points</th></tr></thead>
-    <tbody>${fin}${rest}</tbody></table>`;
+  if (!R.snap) return `<p class="sub" style="padding:24px">No final start list and no qualifying times yet. Checking every 10–20 seconds.</p>`;
+  const P = project(id, R), best = P.order.length && P.order[0].ptime;
+  const timeCell = r => !r.ptime ? '<span class="sub">no qualifying time</span>'
+    : r.pred ? `<span class="sub">≈${fmtMs(r.ptime)}</span> <span class="prov">pred.</span>` : `<b>${fmtMs(r.ptime)}</b>`;
+  const status = r => r.today.k === 'fin' ? `<span class="tag fin">down</span>` : r.today.k === 'track' ? '<span class="tag track">on track</span>' : '<span class="tag tocome">to come</span>';
+  const rows = P.order.map(r => `<tr class="${r.pred ? '' : 'inrace'}"><td class="rk">${r.pred ? `<span class="sub">${r.ppos}</span>` : r.ppos}</td>
+    <td><div class="nm">${esc(r.name)}${r.q2 ? ' <span class="prov">Q2?</span>' : ''}</div><div class="team">${esc(r.team || '')}</div></td><td>${esc(r.nat || '')}</td>
+    <td>${status(r)}</td><td class="num">${timeCell(r)}</td>
+    <td class="num">${r.ppos > 1 && best && r.ptime ? '+' + ((r.ptime - best) / 1000).toFixed(3) : ''}</td>
+    <td class="num tot">${r.pred ? `<span class="sub">${r.ppts}</span>` : r.ppts}</td></tr>`).join('');
+  const out = R.rows.filter(r => r.today && r.today.k === 'out').map(r => `<tr><td class="rk"></td><td><div class="nm">${esc(r.name)}</div><div class="team">${esc(r.team || '')}</div></td>
+    <td>${esc(r.nat || '')}</td><td>${todayCell(r)}</td><td></td><td></td><td class="num">0</td></tr>`).join('');
+  const head = !R.snap.fromQ ? '' : CAT[id].scale === 'elite'
+    ? `Final start list not out yet: top ${CAT[id].field} in qualifying, plus series top-30 riders who may get in through Q2 (<b>Q2?</b>; Q2 isn't in the timing feed, so their Q1 time is used). `
+    : `Final start list not out yet: top ${CAT[id].field} in qualifying. `;
+  return `<p class="sub" style="padding:8px 16px">${head}predicted final time = qualifying time −${S.gain}% until the rider is down, then the actual time. Sorted by time.</p>
+    <table class="st"><thead><tr><th class="num">Pos</th><th>Rider</th><th>Nat</th><th></th><th class="num">Final</th><th class="num">Gap</th><th class="num">Points</th></tr></thead>
+    <tbody>${rows}${out}</tbody></table>`;
 }
 
 /* ---------- Podium: what each rider needs for the top 3, and a chance from season form ---------- */
@@ -723,11 +835,11 @@ function maxIf(id, O, p) {
   return O.max;
 }
 function podium(id) {
-  const snap = S.snaps[id] || null, std = S.standings[id] || null, table = S.points[id] || [];
+  const R = compute(id), snap = R.snap || null, std = S.standings[id] || null, table = S.points[id] || [];
   const c = podCache[id];
   if (c && c.snap === snap && c.std === std && c.table === table) return c.out;
-  const R = compute(id), rows = R.rows, N = rows.length, tl = table.length;
-  const assumed = !snap;   // no start list yet: everyone in the standings may race
+  const rows = R.rows, N = rows.length, tl = table.length;
+  const assumed = !snap;   // no start list and no qualifying: everyone in the standings may race
   rows.forEach((r, i) => {
     if (assumed) { r.today = { k: 'tocome' }; r.min = r.before; r.max = r.before + ptsFor(id, 1); }
     r.pend = !!r.today && (r.today.k === 'track' || r.today.k === 'tocome');
@@ -800,6 +912,11 @@ function podium(id) {
   podCache[id] = { snap, std, table, out };
   return out;
 }
+function projLine(id) {
+  const R = compute(id), P = project(id, R);
+  if (!P.predicted) return '';
+  return `<div class="line">Projected top 3 (qualifying −${S.gain}% for riders to come): ${P.view.slice(0, 3).map(r => `<b>${r.rank}. ${esc(r.name)}</b> ${r.total}`).join(' · ')}</div>`;
+}
 function pct(n, sure) {
   if (sure) return '100%';
   const p = n / SIMS * 100;
@@ -837,7 +954,9 @@ function podiumHtml(id) {
   return `<div class="pod-box"><h3>Podium</h3>
     <div class="line">Top 3 ${prov ? 'now (provisional)' : '(official)'}: ${rows.slice(0, 3).map(r => `<b>${r.rank}. ${esc(r.name)}</b> ${r.total}`).join(' · ')}</div>
     ${alive.length > 3 ? `<div class="line">Most likely on the podium: ${likely.map(r => `${esc(r.name)} ${pct(r.pod, r.locked)}`).join(' · ')}</div>` : ''}
-    ${P.assumed ? '<div class="line sub">Start list not out yet, so every rider in the standings is assumed to race.</div>' : ''}</div>
+    ${projLine(id)}
+    ${P.assumed ? '<div class="line sub">No start list or qualifying yet, so every rider in the standings is assumed to race.</div>'
+      : P.R.snap.fromQ ? `<div class="line sub">Final start list not out yet: field is the top ${CAT[id].field} in qualifying${CAT[id].scale === 'elite' ? ', plus series top-30 riders who may get in through Q2' : ''}.</div>` : ''}</div>
     <table class="st"><thead><tr><th class="num">Now</th><th>Rider / Team</th><th class="num">Total</th><th>Today</th><th class="num">Podium</th><th class="num hide-sm">Title</th><th>What it takes</th></tr></thead>
     <tbody>${body}</tbody></table>
     <p class="footer-note">Only riders who can still reach the top 3 are listed. <b>What it takes</b> is exact from the points table (a tie on points is never counted as sure, since countback then depends on today's places too).
@@ -860,7 +979,9 @@ function renderSetup() {
       <div class="btns"><button class="btn" data-pastebtn="${c.id}">Use pasted rows</button></div></div>`;
   }).join('');
   $('#keyInputs').innerHTML = `<label>Event <input type="text" id="evIn" value="${esc(S.event)}" style="width:160px !important"></label>` +
-    CATS.map(c => `<label>${c.name} <input type="text" data-key="${c.id}" value="${esc(S.keys[c.id])}"></label>`).join('');
+    CATS.map(c => `<label>${c.name} final <input type="text" data-key="${c.id}" value="${esc(S.keys[c.id])}"></label>`).join('');
+  $('#qkeyInputs').innerHTML = CATS.map(c => `<label>${c.name} qualifying <input type="text" data-qkey="${c.id}" value="${esc(S.qkeys[c.id])}"></label>`).join('');
+  $('#gainIn').value = S.gain;
 }
 const stdFile = Object.assign(document.createElement('input'), { type: 'file', accept: '.pdf,.csv,.txt,application/pdf,text/csv,text/plain' });
 let stdFileCat = null;
@@ -900,7 +1021,9 @@ $('#ptsReset').addEventListener('click', () => {
 $('#saveKeys').addEventListener('click', () => {
   S.event = $('#evIn').value.trim() || S.event;
   document.querySelectorAll('[data-key]').forEach(i => { S.keys[i.dataset.key] = i.value.trim(); });
-  S.snaps = {}; Object.keys(live).forEach(k => delete live[k]); save();
+  document.querySelectorAll('[data-qkey]').forEach(i => { S.qkeys[i.dataset.qkey] = i.value.trim(); });
+  const g = parseFloat($('#gainIn').value.replace(',', '.')); if (g >= 0 && g < 30) S.gain = g;
+  S.snaps = {}; S.qsnaps = {}; Object.keys(live).forEach(k => delete live[k]); Object.keys(qlive).forEach(k => delete qlive[k]); save();
   toast('Timing saved; checking again now');
 });
 
@@ -909,6 +1032,7 @@ $('#cards').addEventListener('click', e => { const c = e.target.closest('.card')
 $('#backBtn').addEventListener('click', () => renderHome());
 $('#setupBtn').addEventListener('click', () => renderSetup());
 $('#tabSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { tab = b.dataset.t; renderCat(); } });
+$('#modeSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { stdMode = b.dataset.m; renderCat(); } });
 $('#catSub').addEventListener('click', e => {
   if (e.target.id !== 'offBtn') return;
   S.official[curCat] = !S.official[curCat]; save(); renderCat();
@@ -944,7 +1068,7 @@ setInterval(() => {
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 5;
+const APP_VERSION = 6;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
