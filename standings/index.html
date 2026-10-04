@@ -424,8 +424,9 @@ function crGet(path) {
 const OUT_RE = /DNF|DNS|DSQ|DQ|ABD|DNQ|NC|OUT|DISQ/i;
 // Trim the feed to what the standings need: riders, each rider's latest result, who is on track.
 function snapshot(d) {
-  const riders = (Array.isArray(d.Riders) ? d.Riders : Object.values(d.Riders || {})).map(r => ({
-    nr: r.RaceNr, uci: r.UciRiderId ? String(r.UciRiderId) : null, name: r.PrintName, nat: r.Nation,
+  // Riders is keyed by an internal number (e.g. "1035" for bib 35); Results and OnTrack use that key, not RaceNr.
+  const riders = (Array.isArray(d.Riders) ? d.Riders.map(r => [r.RaceNr, r]) : Object.entries(d.Riders || {})).map(([key, r]) => ({
+    nr: +key, uci: r.UciRiderId ? String(r.UciRiderId) : null, name: r.PrintName, nat: r.Nation,
     team: r.UciTeamName, so: r.StartOrder, st: r.StartTime,
   }));
   const res = {};
@@ -943,7 +944,7 @@ setInterval(() => {
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 4;
+const APP_VERSION = 5;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
