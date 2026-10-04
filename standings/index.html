@@ -134,6 +134,7 @@ td.nowc { white-space: nowrap; font-style: normal; }
 .otcard .split { font-size: 22px; font-weight: 800; color: var(--ok); }
 .otcard .clock { font-size: 20px; font-weight: 800; }
 .otcard .gap.ahead { color: var(--up); font-weight: 800; } .otcard .gap.behind { color: var(--down); font-weight: 800; }
+.notes-foot { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 4px; }
 .otnext { margin-top: 8px; font-size: 13px; color: var(--muted); }
 .nowpos { display: inline-block; min-width: 40px; padding: 3px 7px; border-radius: 8px; font-size: 16px; font-weight: 800; font-style: normal;
   background: var(--accent); color: var(--accent-ink); }
@@ -966,15 +967,16 @@ function raceHtml(id, R) {
   const otbox = R.snap.fromQ ? '' : `<div class="otbox"><h3><span class="tag track">ON TRACK</span>${onc.length ? `${onc.length} rider${onc.length > 1 ? 's' : ''} on course` : 'Nobody on course'}</h3>
     ${onc.length ? `<div class="otcards">${onc.map(card).join('')}</div>` : ''}
     ${next.length ? `<div class="otnext">Next to start: <b>${next.join('</b>, <b>')}</b></div>` : ''}</div>`;
-  return `${otbox}<p class="sub" style="padding:8px 16px 0">${head}Predicted time = best qualifying time (Q1/Q2) ${gainTxt(P)}; on track, updated at each split (S1–S4); actual time once down.</p>
-    <div class="legend"><span><i class="lf"></i>Finished: actual time</span><span><i class="lt"></i>On track: from latest split</span><span><i class="lp"></i>Predicted from qualifying</span><span><b>Pred.</b> = predicted final place · <b>Now</b> = actual place now (finished) or at the latest split (on track)</span></div>
-    <div class="race-grid">
+  const notes = `<p class="sub" style="padding:8px 16px 0">${head}Predicted time = best qualifying time (Q1/Q2) ${gainTxt(P)}; on track, updated at each split (S1–S4); actual time once down.</p>
+    <div class="legend"><span><i class="lf"></i>Finished: actual time</span><span><i class="lt"></i>On track: from latest split</span><span><i class="lp"></i>Predicted from qualifying</span><span><b>Pred.</b> = predicted final place · <b>Now</b> = actual place now (finished) or at the latest split (on track)</span></div>`;
+  return `${otbox}<div class="race-grid">
       <div><h3>Final: live + predicted finish order</h3><div class="wrap"><table class="st"><thead><tr><th class="num">Pred.</th><th class="ctr">Now</th><th>Rider</th><th class="hide-sm">Nat</th><th></th><th class="num">Final</th><th class="num">Gap</th><th class="num">Pts</th></tr></thead>
         <tbody>${rows}${out}</tbody></table></div></div>
       <div><h3>Projected series standings</h3><div class="wrap"><table class="st compact"><thead><tr><th class="num">Proj.</th><th>vs start</th><th>Rider</th><th class="num">Today</th><th class="num">Total</th><th class="num hide-sm">Gap</th></tr></thead>
         <tbody>${std}</tbody></table></div>
         <p class="sub" style="padding:6px 16px">Top ${top.length}${top.length > 15 ? ' (down to everyone projected in today\'s top 10)' : ''}. Full list: Standings → Projected.</p></div>
-    </div>`;
+    </div>
+    <div class="notes-foot">${notes}</div>`;
 }
 
 /* ---------- Podium: what each rider needs for the top 3, and a chance from season form ---------- */
@@ -1234,7 +1236,7 @@ setInterval(() => {
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 14;
+const APP_VERSION = 15;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
