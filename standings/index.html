@@ -127,12 +127,13 @@ table.st.compact td { padding: 6px 5px; }
 td.nowc { white-space: nowrap; font-style: normal; }
 .tap { cursor: pointer; } .chev { color: var(--muted); font-size: 12px; font-style: normal; }
 tr.detail td { background: var(--card) !important; color: var(--ink) !important; font-style: normal !important; padding: 0 0 8px; }
-.sdet { margin: 4px 8px 4px 40px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.sdet { margin: 4px 6px 4px 12px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
 .sdet-h { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-weight: 700; margin-bottom: 4px; }
-table.sdt { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
-table.sdt th { font-size: 11px; color: var(--muted); padding: 3px 6px; text-align: right; font-weight: 700; }
-table.sdt td { padding: 3px 6px; border-top: 1px solid var(--line); }
+table.sdt { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+table.sdt th { font-size: 10px; line-height: 1.15; color: var(--muted); padding: 2px 4px; text-align: right; font-weight: 700; vertical-align: bottom; }
+table.sdt td { padding: 3px 4px; border-top: 1px solid var(--line); white-space: nowrap; }
 table.sdt td.sp { font-weight: 800; color: var(--ok); }
+td.proj { color: var(--accent); font-weight: 700; }
 .gain { color: var(--up); font-weight: 700; } .loss { color: var(--down); font-weight: 700; }
 .plate { display: inline-block; min-width: 30px; padding: 1px 5px; margin-right: 7px; border-radius: 5px; background: var(--ink); color: var(--card);
   font-size: 13px; font-weight: 800; font-style: normal; text-align: center; font-variant-numeric: tabular-nums; vertical-align: 1px; }
@@ -775,24 +776,36 @@ function project(catId, R) {
   const secR = learned && learned.sec, qsecOK = qr => secR && qr && qr.sp && qr.sp.length >= 5 && qr.sp.slice(0, 5).every(Boolean);
   const restBySection = (qr, j) => secOf(qr.sp.slice(0, 5)).reduce((a, t, k) => a + (k > j ? t * secR[k] : 0), 0);
   const shares = splitShares(catId, R.snap);
+  // Predicted finish for rider r given their splits sp, from split j (-1 = before the start).
+  const predictAt = (r, sp, j) => {
+    const qr = qRun(catId, r), q = qr ? qr.time : null, qPred = q ? q * factor : null;
+    if (j >= 0 && sp[j] && shares.s[j]) {
+      const fromSplit = sp[j] / shares.s[j], w = SPLIT_W[Math.min(j, SPLIT_W.length - 1)];
+      const blend = qPred ? w * fromSplit + (1 - w) * qPred : fromSplit, qs = qr && qr.sp && qr.sp[j];
+      const ownPace = qs ? sp[j] + (q - qs) * (sp[j] / qs) : null;
+      const app = ownPace ? (blend + ownPace) / 2 : blend;
+      // Blend with the section model; weights per split from the backtest (median miss 2.1/1.4/0.9/0.4 s at S1-S4).
+      const ws = [0.5, 0.5, 0.5, 0.25][Math.min(j, 3)];
+      return Math.round(qsecOK(qr) ? (1 - ws) * app + ws * (sp[j] + restBySection(qr, j)) : app);
+    }
+    return qsecOK(qr) ? Math.round(restBySection(qr, -1)) : qPred ? Math.round(qPred) : null;
+  };
+  // History of what was shown live, per rider: before the start, then at each split (first value there).
+  const hist = S.predHist || (S.predHist = {});
   for (const r of R.rows) {
     r.ppos = 0; r.ptime = null; r.pred = false; r.src = '';
     if (!r.today || r.today.k === 'out') continue;
     if (r.today.k === 'fin') r.ptime = r.today.time;
     else {
-      const qr = qRun(catId, r), q = qr ? qr.time : null, qPred = q ? q * factor : null, x = R.snap && R.snap.res[r.nr], sp = (x && x.sp) || [];
+      const x = R.snap && R.snap.res[r.nr], sp = (x && x.sp) || [];
       let j = -1;
-      for (let i = Math.min(sp.length, shares.s.length) - 1; i >= 0; i--) if (sp[i] && shares.s[i]) { j = i; break; }
-      if (r.today.k === 'track' && j >= 0) {
-        const fromSplit = sp[j] / shares.s[j], w = SPLIT_W[Math.min(j, SPLIT_W.length - 1)];
-        const blend = qPred ? w * fromSplit + (1 - w) * qPred : fromSplit, qs = qr && qr.sp && qr.sp[j];
-        const ownPace = qs ? sp[j] + (q - qs) * (sp[j] / qs) : null;
-        const app = ownPace ? (blend + ownPace) / 2 : blend;
-        // Blend with the section model; weights per split from the backtest (median miss 2.1/1.4/0.9/0.4 s at S1-S4).
-        const ws = [0.5, 0.5, 0.5, 0.25][Math.min(j, 3)];
-        r.ptime = Math.round(qsecOK(qr) ? (1 - ws) * app + ws * (sp[j] + restBySection(qr, j)) : app); r.src = `split ${j + 1}`;
-      } else r.ptime = qsecOK(qr) ? Math.round(restBySection(qr, -1)) : qPred ? Math.round(qPred) : null;
+      if (r.today.k === 'track') for (let i = Math.min(sp.length, shares.s.length) - 1; i >= 0; i--) if (sp[i] && shares.s[i]) { j = i; break; }
+      r.ptime = predictAt(r, sp, j); r.src = j >= 0 ? `split ${j + 1}` : '';
       r.pred = true;
+      if (R.snap && !R.snap.fromQ && r.ptime) {
+        const h = hist[`${S.event}|${catId}|${r.nr}`] || (hist[`${S.event}|${catId}|${r.nr}`] = {});
+        if (j < 0) h.pre = r.ptime; else if (h['s' + j] == null) h['s' + j] = r.ptime;
+      }
     }
     order.push(r);
   }
@@ -811,7 +824,7 @@ function project(catId, R) {
     const tie = !!((p && p.prank === r.prank) || (n && n.prank === r.prank));
     return { ...r, orig: r, rank: r.prank, total: r.ptotal, tie, cbSplit: !tie && !!((p && p.ptotal === r.ptotal) || (n && n.ptotal === r.ptotal)) };
   });
-  return { order, view, predicted: order.filter(r => r.pred && r.ptime).length, hasQ: !!(S.qsnaps && S.qsnaps[catId]), learned };
+  return { order, view, predicted: order.filter(r => r.pred && r.ptime).length, hasQ: !!(S.qsnaps && S.qsnaps[catId]), learned, predictAt };
 }
 
 /* ---------- Title scenarios (before and during the final) ---------- */
@@ -1028,7 +1041,12 @@ function raceHtml(id, R) {
   const leadR = R.hot[0], leadX = leadR ? R.snap.res[leadR.nr] : null;
   const dl = v => v == null ? '' : `<span class="${v < 0 ? 'gain' : v > 0 ? 'loss' : ''}">${v > 0 ? '+' : v < 0 ? '−' : '±'}${(Math.abs(v) / 1000).toFixed(2)}</span>`;
   const splitDetail = r => {
-    const x = R.snap.res[r.nr] || {};
+    const x = R.snap.res[r.nr] || {}, h = (S.predHist || {})[`${S.event}|${id}|${r.nr}`] || {}, fin = r.today && r.today.k === 'fin';
+    // Projected finish shown live at that point (recomputed with today's model, marked *, if the app wasn't watching then).
+    const projAt = j => { const v = h[j < 0 ? 'pre' : 's' + j]; if (v != null) return { v, rec: false };
+      const c = P.predictAt(r, x.sp || [], j); return c ? { v: c, rec: true } : null; };
+    const projCells = j => { if (j > 3) return '<td></td><td></td>'; const pa = projAt(j); if (!pa) return '<td></td><td></td>';
+      return `<td class="num proj">≈${fmtMs(pa.v)}${pa.rec ? '*' : ''}</td><td class="num">${fin ? dl(pa.v - r.today.time) : ''}</td>`; };
     let sp = x.sp || [], src = '';
     if (!sp.length) { const q = qRun(id, r); sp = (q && q.sp) || []; src = 'q'; }
     if (!sp.length) return '<span class="sub">No split times yet.</span>';
@@ -1040,10 +1058,14 @@ function raceHtml(id, R) {
         <td class="num">${!src && x.spPos && x.spPos[j] ? ord(x.spPos[j]) : ''}</td>
         <td class="num">${src ? '' : dl(fastCum[j] != null ? t - fastCum[j] : null)}</td>
         <td class="num">${st ? fmtMs(st) : ''}</td><td class="num">${src ? '' : dl(st && fastSec[j] ? st - fastSec[j] : null)}</td>
-        <td class="num">${src || isLead ? '' : dl(lsp[j] ? t - lsp[j] : null)}</td><td class="num">${src || isLead ? '' : dl(st && secAt(lsp, j) ? st - secAt(lsp, j) : null)}</td></tr>`;
+        <td class="num">${src || isLead ? '' : dl(lsp[j] ? t - lsp[j] : null)}</td><td class="num">${src || isLead ? '' : dl(st && secAt(lsp, j) ? st - secAt(lsp, j) : null)}</td>
+        ${src ? '<td></td><td></td>' : projCells(j)}</tr>`;
     }).join('');
+    const pre = projAt(-1), preRow = pre ? `<tr class="prerow"><td class="sp">Start</td><td colspan="7" class="sub">${src ? 'predicted from qualifying' : 'before the start'}</td>
+      <td class="num proj">≈${fmtMs(pre.v)}${pre.rec ? '*' : ''}</td><td class="num">${fin ? dl(pre.v - r.today.time) : ''}</td></tr>` : '';
     return `<div class="sdet"><div class="sdet-h">${nm(r)} ${src ? '<span class="sub">no run in the final yet: best qualifying run</span>' : ''}${leadR && !src ? `<span class="sub">leader: ${nm(leadR)}</span>` : ''}</div>
-      <table class="sdt"><thead><tr><th></th><th class="num">Time</th><th class="num">Pos</th><th class="num">vs fastest</th><th class="num">Section</th><th class="num">vs fastest section</th><th class="num">vs leader</th><th class="num">section vs leader</th></tr></thead><tbody>${rowsD}</tbody></table></div>`;
+      <div class="wrap"><table class="sdt"><thead><tr><th></th><th class="num">Time</th><th class="num">Pos</th><th class="num">vs<br>fastest</th><th class="num">Section</th><th class="num">vs fastest<br>section</th><th class="num">vs<br>leader</th><th class="num">section<br>vs leader</th><th class="num">Projected<br>finish</th><th class="num">${fin ? 'miss' : ''}</th></tr></thead><tbody>${preRow}${rowsD}</tbody></table></div>
+      <div class="sub" style="margin-top:4px">Projected finish = what the model predicted at that point${fin ? `; miss = projected − actual (${fmtMs(r.today.time)})` : ''}. * = recomputed now (the app wasn't watching then).</div></div>`;
   };
   const rows = P.order.map(r => `<tr class="${cls(r)}"><td class="rk">${r.ppos}</td><td class="ctr nowc">${nowCell(r)}</td>
     <td><div class="nm tap" data-rider="${r.nr}">${nm(r)}${r.q2 ? ' <span class="prov">Q2?</span>' : ''} <span class="chev">${openRiders.has(r.nr) ? '▾' : '▸'}</span></div><div class="team">${esc(r.team || '')}</div></td>
@@ -1366,7 +1388,7 @@ setInterval(() => {
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 20;
+const APP_VERSION = 21;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
