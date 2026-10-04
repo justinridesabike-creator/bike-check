@@ -125,6 +125,15 @@ table.st tr.r-out td { color: var(--muted); }
 .tag.pred { background: transparent; border: 1px dashed var(--muted); color: var(--muted); font-style: normal; }
 table.st.compact td { padding: 6px 5px; }
 td.nowc { white-space: nowrap; font-style: normal; }
+.tap { cursor: pointer; } .chev { color: var(--muted); font-size: 12px; font-style: normal; }
+tr.detail td { background: var(--card) !important; color: var(--ink) !important; font-style: normal !important; padding: 0 0 8px; }
+.sdet { margin: 4px 8px 4px 40px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.sdet-h { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-weight: 700; margin-bottom: 4px; }
+table.sdt { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+table.sdt th { font-size: 11px; color: var(--muted); padding: 3px 6px; text-align: right; font-weight: 700; }
+table.sdt td { padding: 3px 6px; border-top: 1px solid var(--line); }
+table.sdt td.sp { font-weight: 800; color: var(--ok); }
+.gain { color: var(--up); font-weight: 700; } .loss { color: var(--down); font-weight: 700; }
 .plate { display: inline-block; min-width: 30px; padding: 1px 5px; margin-right: 7px; border-radius: 5px; background: var(--ink); color: var(--card);
   font-size: 13px; font-weight: 800; font-style: normal; text-align: center; font-variant-numeric: tabular-nums; vertical-align: 1px; }
 .otcard .plate { font-size: 15px; }
@@ -524,7 +533,9 @@ function statusOf(snap, nr) {
   if (x && /^NA$/i.test(x.st) && !snap.onTrack.includes(nr)) {
     const me = snap.riders.find(r => r.nr === nr), so = me ? me.so : null;
     const laterGone = so != null && snap.riders.some(r => r.so > so && snap.res[r.nr] && snap.res[r.nr].st && !/^NA$/i.test(snap.res[r.nr].st));
-    if (laterGone || (x.est && eventMsOfDay() > x.est + 600000)) return { k: 'out', label: 'DNS' };
+    // Start delays are common, so the clock alone never makes a DNS while the feed still lists the rider as next to start.
+    const listedNext = (snap.next || []).includes(nr);
+    if (laterGone || (!listedNext && x.est && eventMsOfDay() > x.est + 600000)) return { k: 'out', label: 'DNS' };
     return { k: 'tocome' };
   }
   // Live feed: "NA" = not started yet, "InRace" = on track (with the splits done so far), then Finished/DNF/DSQ/DNS.
@@ -837,6 +848,7 @@ function scenarios(catId) {
 
 /* ---------- Rendering ---------- */
 let view = 'home', curCat = null, tab = 'standings', stdMode = 'proj';
+const openRiders = new Set();
 const prevRank = {};
 function stateBadge(catId) {
   const st = raceState(catId);
@@ -1006,11 +1018,38 @@ function raceHtml(id, R) {
     }
     return '<span class="sub">to come</span>';
   };
+  // Split detail for a tapped rider: per timing point, cumulative and section times vs the fastest and vs the leader.
+  const runs = Object.values(R.snap.res).filter(x => x.sp && x.sp.length && !/^NA$/i.test(x.st || ''));
+  const NP = Math.max(5, ...runs.map(x => x.sp.length));
+  const secAt = (sp, k) => sp[k] && (k === 0 || sp[k - 1]) ? sp[k] - (k ? sp[k - 1] : 0) : null;
+  const minOf = a => { const v = a.filter(x => x != null && x > 0); return v.length ? Math.min(...v) : null; };
+  const fastCum = [...Array(NP)].map((_, j) => minOf(runs.map(x => x.sp[j])));
+  const fastSec = [...Array(NP)].map((_, k) => minOf(runs.map(x => secAt(x.sp, k))));
+  const leadR = R.hot[0], leadX = leadR ? R.snap.res[leadR.nr] : null;
+  const dl = v => v == null ? '' : `<span class="${v < 0 ? 'gain' : v > 0 ? 'loss' : ''}">${v > 0 ? '+' : v < 0 ? '−' : '±'}${(Math.abs(v) / 1000).toFixed(2)}</span>`;
+  const splitDetail = r => {
+    const x = R.snap.res[r.nr] || {};
+    let sp = x.sp || [], src = '';
+    if (!sp.length) { const q = qRun(id, r); sp = (q && q.sp) || []; src = 'q'; }
+    if (!sp.length) return '<span class="sub">No split times yet.</span>';
+    const lsp = leadX && leadX.sp || [];
+    const rowsD = sp.map((t, j) => {
+      if (!t) return '';
+      const st = secAt(sp, j), isLead = leadR && leadR.nr === r.nr;
+      return `<tr><td class="sp">${j === sp.length - 1 && (x.pos > 0 || src) && j >= 4 ? 'Finish' : 'S' + (j + 1)}</td><td class="num">${fmtMs(t)}</td>
+        <td class="num">${!src && x.spPos && x.spPos[j] ? ord(x.spPos[j]) : ''}</td>
+        <td class="num">${src ? '' : dl(fastCum[j] != null ? t - fastCum[j] : null)}</td>
+        <td class="num">${st ? fmtMs(st) : ''}</td><td class="num">${src ? '' : dl(st && fastSec[j] ? st - fastSec[j] : null)}</td>
+        <td class="num">${src || isLead ? '' : dl(lsp[j] ? t - lsp[j] : null)}</td><td class="num">${src || isLead ? '' : dl(st && secAt(lsp, j) ? st - secAt(lsp, j) : null)}</td></tr>`;
+    }).join('');
+    return `<div class="sdet"><div class="sdet-h">${nm(r)} ${src ? '<span class="sub">no run in the final yet: best qualifying run</span>' : ''}${leadR && !src ? `<span class="sub">leader: ${nm(leadR)}</span>` : ''}</div>
+      <table class="sdt"><thead><tr><th></th><th class="num">Time</th><th class="num">Pos</th><th class="num">vs fastest</th><th class="num">Section</th><th class="num">vs fastest section</th><th class="num">vs leader</th><th class="num">section vs leader</th></tr></thead><tbody>${rowsD}</tbody></table></div>`;
+  };
   const rows = P.order.map(r => `<tr class="${cls(r)}"><td class="rk">${r.ppos}</td><td class="ctr nowc">${nowCell(r)}</td>
-    <td><div class="nm">${nm(r)}${r.q2 ? ' <span class="prov">Q2?</span>' : ''}</div><div class="team">${esc(r.team || '')}</div></td>
+    <td><div class="nm tap" data-rider="${r.nr}">${nm(r)}${r.q2 ? ' <span class="prov">Q2?</span>' : ''} <span class="chev">${openRiders.has(r.nr) ? '▾' : '▸'}</span></div><div class="team">${esc(r.team || '')}</div></td>
     <td class="hide-sm">${esc(r.nat || '')}</td><td>${status(r)}</td><td class="num">${timeCell(r)}</td>
     <td class="num">${r.ppos > 1 && best && r.ptime ? '+' + ((r.ptime - best) / 1000).toFixed(r.pred ? 1 : 3) : ''}</td>
-    <td class="num tot">${r.pred ? '≈' : ''}${r.ppts}</td></tr>`).join('');
+    <td class="num tot">${r.pred ? '≈' : ''}${r.ppts}</td></tr>${openRiders.has(r.nr) ? `<tr class="detail"><td colspan="8">${splitDetail(r)}</td></tr>` : ''}`).join('');
   const out = R.rows.filter(r => r.today && r.today.k === 'out').map(r => `<tr class="r-out"><td class="rk"></td><td></td><td><div class="nm">${nm(r)}</div><div class="team">${esc(r.team || '')}</div></td>
     <td class="hide-sm">${esc(r.nat || '')}</td><td>${todayCell(r)}</td><td></td><td></td><td class="num">0</td></tr>`).join('');
   const cat = CAT[id], q2in = cat.q2n && (S.q2snaps || {})[id];
@@ -1043,7 +1082,7 @@ function raceHtml(id, R) {
     const splits = [];
     for (let i = 0; i <= j; i++) if (x.sp[i]) splits.push(`<tr${i === j ? ' class="last"' : ''}><td class="sp">S${i + 1}</td><td class="num">${fmtMs(x.sp[i])}</td>
       <td class="num">${x.spPos && x.spPos[i] ? ord(x.spPos[i]) : ''}</td><td class="num">${gapTxt(x.spGap && x.spGap[i], x.spPos && x.spPos[i])}</td></tr>`);
-    return `<div class="otcard"><div class="row"><span class="nm">${nm(r)}</span>${clock}</div>
+    return `<div class="otcard"><div class="row"><span class="nm tap" data-rider="${r.nr}">${nm(r)}</span>${clock}</div>
       <table class="otsplits">${splits.join('') || '<tr><td colspan="4" class="sub">no split yet</td></tr>'}
       <tr class="eta"><td class="sp">Finish</td><td class="num">${r.ptime ? '≈' + fmtMs(r.ptime) : '—'}</td><td class="num">≈${ord(r.ppos)}</td><td class="num sub">${r.src ? 'from S' + (j + 1) : 'predicted'}</td></tr></table></div>`;
   };
@@ -1280,6 +1319,13 @@ $('#cards').addEventListener('click', e => { const c = e.target.closest('.card')
 $('#backBtn').addEventListener('click', () => renderHome());
 $('#setupBtn').addEventListener('click', () => renderSetup());
 $('#tabSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { tab = b.dataset.t; renderCat(); } });
+$('#catBody').addEventListener('click', e => {
+  const t = e.target.closest('[data-rider]'); if (!t) return;
+  const nr = +t.dataset.rider; openRiders.has(nr) ? openRiders.delete(nr) : openRiders.add(nr);
+  if (tab !== 'race') return;
+  renderCat();
+  const row = document.querySelector(`#catBody table.st [data-rider="${nr}"]`); if (row) row.scrollIntoView({ block: 'nearest' });
+});
 $('#modeSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { stdMode = b.dataset.m; renderCat(); } });
 $('#catSub').addEventListener('click', e => {
   if (e.target.id !== 'offBtn') return;
@@ -1320,7 +1366,7 @@ setInterval(() => {
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 19;
+const APP_VERSION = 20;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
