@@ -82,6 +82,9 @@ main, .view { padding: 16px; max-width: 1180px; margin: 0 auto; }
 .title-box th { color: var(--muted); font-weight: 600; }
 .title-box .scen { display: flex; flex-wrap: wrap; gap: 18px; }
 .title-box tr.hit td { font-weight: 800; color: var(--gold); }
+.title-box tr.gone td:not(:last-child) { text-decoration: line-through; color: var(--muted); opacity: .6; }
+.title-box tr.gone td:last-child { opacity: .7; }
+.ok-st { color: var(--ok); font-weight: 800; } .no-st { color: var(--danger); font-weight: 800; }
 
 .wrap { overflow-x: auto; }
 table.st { width: 100%; border-collapse: collapse; background: var(--card); }
@@ -977,14 +980,35 @@ function titleHtml(id, R) {
   }
   const sc = scenarios(id);
   if (!sc.length && R.decided && !snap) return '';
-  const tables = sc.slice(0, 3).map(s => `<div><table><tr><th>If ${esc(s.C.name)} is</th><th>${esc(s.L.name)} needs</th></tr>${
+  // Live: each rider's possible place today. Finished: own place down to place + riders still to come;
+  // still to come: anywhere in the field; out / not racing: no points.
+  const tl = (S.points[id] || []).length, nPend = R.pending.length, field = R.downCount + nPend;
+  const range = r => {
+    if (!r || !r.today || r.today.k === 'out') return { none: true };
+    if (r.today.k === 'fin') return { lo: r.today.pos, hi: r.today.pos + nPend };
+    return { lo: 1, hi: Math.max(field, 1) };
+  };
+  const rowOf = b => R.rows.find(r => keysOf(r).some(k => keysOf(b).includes(k)));
+  const tables = sc.slice(0, 3).map(s => {
+    const cR = rowOf(s.C), lR = rowOf(s.L), cr = range(cR), lr = range(lR), live = !!S.snaps[id];
+    return `<div><table><tr><th>If ${esc(s.C.name)} is</th><th>${esc(s.L.name)} needs</th>${live ? '<th>now</th>' : ''}</tr>${
     s.lines.map(l => {
-      const cR = R.rows.find(r => r.name === s.C.name), hit = cR && cR.today && cR.today.k === 'fin' && cR.today.pos === l.c;
+      const hit = cR && cR.today && cR.today.k === 'fin' && cR.today.pos === l.c;
+      // Can C still finish at l.c (or l.c or worse)?
+      const possible = !live ? true : l.safe ? (cr.none || cr.hi >= l.c) : (!cr.none && cr.lo <= l.c && l.c <= cr.hi);
       const tieTxt = l.tie ? ` (${ord(l.tie)} = tie on points, ${esc(l.tieWon ? s.L.name : s.C.name)} wins countback)` : '';
       const need = l.safe || l.any ? 'title whatever happens' : l.need ? `${ord(l.need)} or better${tieTxt}` : `can't win${tieTxt}`;
-      return `<tr class="${hit ? 'hit' : ''}"><td>${l.safe ? `${ord(l.c)} or worse` : ord(l.c)}</td><td>${need}</td></tr>`;
-    }).join('')}</table></div>`).join('');
-  return `<div class="title-box"><h3>Title</h3><div class="now">${now}</div>${tables ? `<div class="sub" style="margin-top:6px">From the standings before today (gap ${sc[0].L.pts - sc[0].C.pts} to ${esc(sc[0].C.name)}); highlighted: current position.</div><div class="scen">${tables}</div>` : ''}</div>`;
+      let st = '';
+      if (live && possible && !(l.safe || l.any) && l.need) {
+        const n = l.need > tl ? Infinity : l.need;
+        st = lr.none ? (n === Infinity ? '<span class="ok-st">✓ secured</span>' : '<span class="no-st">✗ out of reach</span>')
+          : lr.hi <= n ? '<span class="ok-st">✓ secured</span>' : lr.lo > n ? '<span class="no-st">✗ out of reach</span>'
+          : `<span class="sub">${esc(s.L.name.split(' ')[0])} ${lr.lo === lr.hi ? ord(lr.lo) : `${ord(lr.lo)}–${ord(Math.min(lr.hi, field))}`} possible</span>`;
+      }
+      return `<tr class="${hit ? 'hit' : ''} ${possible ? '' : 'gone'}"><td>${l.safe ? `${ord(l.c)} or worse` : ord(l.c)}</td><td>${need}</td>${live ? `<td>${possible ? st : '<span class="sub">no longer possible</span>'}</td>` : ''}</tr>`;
+    }).join('')}</table></div>`;
+  }).join('');
+  return `<div class="title-box"><h3>Title</h3><div class="now">${now}</div>${tables ? `<div class="sub" style="margin-top:6px">From the standings before today (gap ${sc[0].L.pts - sc[0].C.pts} to ${esc(sc[0].C.name)}); highlighted: current position${S.snaps[id] ? '; struck through: no longer possible with the results so far' : ''}.</div><div class="scen">${tables}</div>` : ''}</div>`;
 }
 // Plate number badge before a rider's name.
 function plate(r) { return r && r.bib != null ? `<span class="plate">${esc(r.bib)}</span>` : ''; }
@@ -1476,7 +1500,7 @@ setInterval(() => {
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 25;
+const APP_VERSION = 26;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
