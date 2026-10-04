@@ -125,6 +125,9 @@ table.st tr.r-out td { color: var(--muted); }
 .tag.pred { background: transparent; border: 1px dashed var(--muted); color: var(--muted); font-style: normal; }
 table.st.compact td { padding: 6px 5px; }
 td.nowc { white-space: nowrap; font-style: normal; }
+.plate { display: inline-block; min-width: 30px; padding: 1px 5px; margin-right: 7px; border-radius: 5px; background: var(--ink); color: var(--card);
+  font-size: 13px; font-weight: 800; font-style: normal; text-align: center; font-variant-numeric: tabular-nums; vertical-align: 1px; }
+.otcard .plate { font-size: 15px; }
 .otbox { margin: 10px 16px 4px; padding: 12px 14px; border: 2px solid var(--ok); border-radius: 14px; background: var(--card); }
 .otbox h3 { margin: 0 0 8px; font-size: 16px; display: flex; gap: 10px; align-items: center; }
 .otcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
@@ -475,7 +478,7 @@ const OUT_RE = /DNF|DNS|DSQ|DQ|ABD|DNQ|NC|OUT|DISQ/i;
 function snapshot(d) {
   // Riders is keyed by an internal number (e.g. "1035" for bib 35); Results and OnTrack use that key, not RaceNr.
   const riders = (Array.isArray(d.Riders) ? d.Riders.map(r => [r.RaceNr, r]) : Object.entries(d.Riders || {})).map(([key, r]) => ({
-    nr: +key, uci: r.UciRiderId ? String(r.UciRiderId) : null, name: r.PrintName, nat: r.Nation,
+    nr: +key, bib: r.RaceNr, uci: r.UciRiderId ? String(r.UciRiderId) : null, name: r.PrintName, nat: r.Nation,
     team: r.UciTeamName, so: r.StartOrder, st: r.StartTime,
   }));
   const res = {};
@@ -600,13 +603,14 @@ function compute(catId) {
     for (const f of snap.riders) {
       let r = keysOf(f).map(k => index.get(k)).find(Boolean);
       if (!r) { r = { name: f.name, nat: f.nat, team: f.team, uci: f.uci, before: 0, startRank: null }; rows.push(r); keysOf(f).forEach(k => index.set(k, r)); }
-      r.uci = r.uci || f.uci; r.team = r.team || f.team; r.inRace = true; r.nr = f.nr; r.so = f.so; r.q2 = !!f.q2;
+      r.uci = r.uci || f.uci; r.team = r.team || f.team; r.inRace = true; r.nr = f.nr; r.so = f.so; r.q2 = !!f.q2; r.bib = f.bib;
       r.today = statusOf(snap, f.nr);
       if (r.today.k === 'fin' || r.today.k === 'out') downCount++;
       else pending.push(r);
     }
   }
   const n = pending.length;
+  for (const r of rows) if (r.bib == null) r.bib = bibFromQ(catId, r);
   for (const r of rows) {
     const t = r.today;
     r.pts = t && t.k === 'fin' ? ptsFor(catId, t.pos) : 0;
@@ -920,6 +924,20 @@ function titleHtml(id, R) {
     }).join('')}</table></div>`).join('');
   return `<div class="title-box"><h3>Title</h3><div class="now">${now}</div>${tables ? `<div class="sub" style="margin-top:6px">From the standings before today (gap ${sc[0].L.pts - sc[0].C.pts} to ${esc(sc[0].C.name)}); highlighted: current position.</div><div class="scen">${tables}</div>` : ''}</div>`;
 }
+// Plate number badge before a rider's name.
+function plate(r) { return r && r.bib != null ? `<span class="plate">${esc(r.bib)}</span>` : ''; }
+function nm(r) { return `${plate(r)}${esc(r.name)}`; }
+const bibIdx = new WeakMap();
+function bibFromQ(catId, r) {
+  for (const q of [(S.qsnaps || {})[catId], (S.q2snaps || {})[catId]]) {
+    if (!q) continue;
+    let m = bibIdx.get(q);
+    if (!m) { m = new Map(); for (const x of q.riders) if (x.bib != null) keysOf(x).forEach(k => m.set(k, x.bib)); bibIdx.set(q, m); }
+    const b = keysOf(r).map(k => m.get(k)).find(v => v != null);
+    if (b != null) return b;
+  }
+  return null;
+}
 function rankTxt(r) { return `${r.tie ? '=' : ''}${r.rank}${r.cbSplit ? '<sup class="cbm">cb</sup>' : ''}`; }
 function todayCell(r) {
   const t = r.today;
@@ -952,7 +970,7 @@ function standingsHtml(id, R) {
     const ahead = i > 0 ? rows[i - 1] : null;
     return `<tr class="${r.inRace ? 'inrace' : ''} ${i === 0 ? 'leader' : ''} ${cset.has(r.orig || r) ? 'contender' : ''} ${bump ? 'bump' : ''}">
       <td class="rk">${rankTxt(r)}</td><td class="mv">${mv}</td>
-      <td><div class="nm">${esc(r.name)}</div><div class="team">${esc(r.team || '')}</div></td>
+      <td><div class="nm">${nm(r)}</div><div class="team">${esc(r.team || '')}</div></td>
       <td>${esc(r.nat || '')}</td>
       <td class="num hide-sm">${r.before}</td>
       <td class="today">${cell(r)}</td>
@@ -983,11 +1001,11 @@ function raceHtml(id, R) {
     return '<span class="sub">to come</span>';
   };
   const rows = P.order.map(r => `<tr class="${cls(r)}"><td class="rk">${r.ppos}</td><td class="ctr nowc">${nowCell(r)}</td>
-    <td><div class="nm">${esc(r.name)}${r.q2 ? ' <span class="prov">Q2?</span>' : ''}</div><div class="team">${esc(r.team || '')}</div></td>
+    <td><div class="nm">${nm(r)}${r.q2 ? ' <span class="prov">Q2?</span>' : ''}</div><div class="team">${esc(r.team || '')}</div></td>
     <td class="hide-sm">${esc(r.nat || '')}</td><td>${status(r)}</td><td class="num">${timeCell(r)}</td>
     <td class="num">${r.ppos > 1 && best && r.ptime ? '+' + ((r.ptime - best) / 1000).toFixed(r.pred ? 1 : 3) : ''}</td>
     <td class="num tot">${r.pred ? '≈' : ''}${r.ppts}</td></tr>`).join('');
-  const out = R.rows.filter(r => r.today && r.today.k === 'out').map(r => `<tr class="r-out"><td class="rk"></td><td></td><td><div class="nm">${esc(r.name)}</div><div class="team">${esc(r.team || '')}</div></td>
+  const out = R.rows.filter(r => r.today && r.today.k === 'out').map(r => `<tr class="r-out"><td class="rk"></td><td></td><td><div class="nm">${nm(r)}</div><div class="team">${esc(r.team || '')}</div></td>
     <td class="hide-sm">${esc(r.nat || '')}</td><td>${todayCell(r)}</td><td></td><td></td><td class="num">0</td></tr>`).join('');
   const cat = CAT[id], q2in = cat.q2n && (S.q2snaps || {})[id];
   const head = !R.snap.fromQ ? '' : q2in ? `Final start list not in timing yet: Q1 top ${cat.q1n} + Q2 top ${cat.q2n}. `
@@ -1003,11 +1021,11 @@ function raceHtml(id, R) {
     const c = !r.today || r.today.k === 'out' || r.today.k === 'fin' ? (r.inRace ? 'r-fin' : '') : r.today.k === 'track' ? 'r-track' : 'r-pred';
     const today = !r.today ? '<span class="sub">not racing</span>' : r.today.k === 'out' ? `<span class="tag out">${esc(r.today.label)}</span>`
       : `${r.pred ? '≈' : ''}+${r.ppts}${r.pred ? '' : ''}`;
-    return `<tr class="${c}"><td class="rk">${rankTxt(r)}</td><td class="mv">${mv}</td><td><div class="nm">${esc(r.name)}</div></td>
+    return `<tr class="${c}"><td class="rk">${rankTxt(r)}</td><td class="mv">${mv}</td><td><div class="nm">${nm(r)}</div></td>
       <td class="num">${today}</td><td class="num tot">${r.pred && r.ppts ? '≈' : ''}${r.total}</td><td class="num hide-sm">${r === lead ? '' : '−' + (lead.total - r.total)}</td></tr>`;
   }).join('');
   // On-track box: riders on course, furthest down the hill first.
-  const nameOf = nr => { const r = R.rows.find(x => x.nr === nr); return r ? esc(r.name) : '#' + nr; };
+  const nameOf = nr => { const r = R.rows.find(x => x.nr === nr); return r ? nm(r) : '#' + nr; };
   const onc = P.order.filter(r => r.today.k === 'track').map(r => {
     const x = R.snap.res[r.nr] || {}, sp = x.sp || [];
     let j = -1; for (let i = sp.length - 1; i >= 0; i--) if (sp[i]) { j = i; break; }
@@ -1017,7 +1035,7 @@ function raceHtml(id, R) {
     const gap = j >= 0 && x.spGap ? x.spGap[j] : null, pos = j >= 0 && x.spPos ? x.spPos[j] : null;
     const gapTxt = gap == null ? '' : gap <= 0 ? `<span class="gap ahead">${pos === 1 ? 'fastest' : ''} ${gap < 0 ? '−' + (Math.abs(gap) / 1000).toFixed(2) : ''}</span>` : `<span class="gap behind">+${(gap / 1000).toFixed(2)}</span>`;
     const clock = x.time > 0 ? `<span class="clock" data-clock="${x.time}" data-at="${R.snap.at}">${fmtClock(x.time)}</span>` : '<span class="sub">starting</span>';
-    return `<div class="otcard"><div class="row"><span class="nm">${esc(r.name)}</span>${clock}</div>
+    return `<div class="otcard"><div class="row"><span class="nm">${nm(r)}</span>${clock}</div>
       <div class="row"><span class="split">${j >= 0 ? 'S' + (j + 1) : 'start'}</span>${j >= 0 ? `<span>${fmtMs(x.sp[j])}${pos ? ` · <b>${ord(pos)}</b>` : ''}</span>${gapTxt}` : '<span class="sub">no split yet</span>'}</div>
       <div class="row"><span class="sub">predicted</span><span>${r.ptime ? '≈' + fmtMs(r.ptime) : '—'}</span><b>≈${ord(r.ppos)}</b></div></div>`;
   };
@@ -1163,7 +1181,7 @@ function podiumHtml(id) {
   const prov = raceState(id) !== 'official';
   const body = alive.map(r => `<tr class="${r.inRace ? 'inrace' : ''} ${r.rank <= 3 ? 'leader' : ''}">
       <td class="rk">${rankTxt(r)}</td>
-      <td><div class="nm">${esc(r.name)}</div><div class="team">${esc(r.team || '')}</div></td>
+      <td><div class="nm">${nm(r)}</div><div class="team">${esc(r.team || '')}</div></td>
       <td class="num tot">${r.total}${r.fin && r.min !== r.max ? `<span class="range">${r.min}–${r.max}</span>` : ''}</td>
       <td class="today">${todayCell(r)}</td>
       <td class="num"><span class="chance">${pct(r.pod, r.locked)}</span><div class="pbar"><i style="width:${r.locked ? 100 : (r.pod / SIMS * 100).toFixed(1)}%"></i></div></td>
@@ -1294,7 +1312,7 @@ setInterval(() => {
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 17;
+const APP_VERSION = 18;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
