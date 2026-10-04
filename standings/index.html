@@ -198,7 +198,8 @@ td.need .ok { color: var(--ok); font-weight: 800; }
     <p>ChronoRace event, the key of each final, and the key of each qualifying (the base for predicted final times).</p>
     <div class="keys" id="keyInputs"></div>
     <div class="keys" id="qkeyInputs" style="margin-top:10px"></div>
-    <div class="keys" style="margin-top:10px"><label>Final faster than qualifying by <input type="text" id="gainIn" inputmode="decimal"> %</label></div>
+    <div class="keys" style="margin-top:10px"><label>Final faster than qualifying by <input type="text" id="gainIn" inputmode="decimal"> %</label>
+      <label><input type="checkbox" id="learnIn" style="width:auto !important;min-height:0"> Once 3 riders are down, use their actual gain over qualifying instead (backtest: typical miss 2.7 s vs 4.2 s)</label></div>
     <p>2026 season: final 1–3% faster than qualifying in normal conditions (median rider; the fastest riders 2.5–4%).</p>
     <div class="btns"><button class="btn" id="saveKeys">Save timing</button></div>
   </section>
@@ -442,17 +443,25 @@ function snapshot(d) {
   for (const x of d.Results || []) {
     const prev = res[x.RaceNr];
     if (prev && (prev.run || 0) > (x.Run || 0)) continue;
-    res[x.RaceNr] = { run: x.Run, pos: x.Position, st: x.Status || '', time: x.RaceTime, inRes: x.InResult };
+    res[x.RaceNr] = { run: x.Run, pos: x.Position, st: x.Status || '', time: x.RaceTime, inRes: x.InResult, sp: splitsOf(x) };
   }
   const nrOf = e => (e && typeof e === 'object') ? (e.RaceNr ?? e.Bib ?? e.Nr) : e;
   const onTrack = (d.OnTrack || []).map(nrOf).filter(x => x != null);
+  // On-track entries may carry their splits too; keep whichever has more.
+  for (const e of d.OnTrack || []) {
+    if (!e || typeof e !== 'object' || e.RaceNr == null) continue;
+    const sp = splitsOf(e), cur = res[e.RaceNr];
+    if (sp.length && (!cur || (cur.sp || []).length < sp.length) && !(cur && cur.time && cur.pos > 0)) res[e.RaceNr] = { ...(cur || { run: e.Run, pos: 0, st: e.Status || '' }), sp };
+  }
   return { at: Date.now(), riders, res, onTrack };
 }
+// Elapsed time at each timing point (the last one is the finish); null where missing.
+function splitsOf(x) { const t = (x.Times || []).map(p => (p && p.RaceTime) || null); while (t.length && t[t.length - 1] == null) t.pop(); return t; }
 function statusOf(snap, nr) {
   const x = snap.res[nr];
   if (x && OUT_RE.test(x.st)) return { k: 'out', label: x.st.toUpperCase().match(OUT_RE)[0] };
   if (x && x.pos > 0 && (/finish/i.test(x.st) || x.inRes)) return { k: 'fin', pos: x.pos, time: x.time };
-  if (snap.onTrack.includes(nr)) return { k: 'track' };
+  if (snap.onTrack.includes(nr) || (x && x.sp && x.sp.length)) return { k: 'track' };
   if (x && x.st && !/start|wait|not/i.test(x.st)) return { k: 'track', label: x.st };
   return { k: 'tocome' };
 }
@@ -613,13 +622,42 @@ function qTime(catId, r) {
   return best;
 }
 // Projected finish: actual time once down, else qualifying time minus S.gain %. Riders with no qualifying time go last.
+// On track, from each split: elapsed time / (share of the run done at that split), the share being the median of
+// today's finishers (qualifying runs until 3 are down), blended with the qualifying-based time.
+// Backtest on the 2026 finals: median miss 2.4 s at split 1, 1.6 s at 2, 0.9 s at 3, 0.5 s at 4 (4.2 s from Q alone).
+const SPLIT_W = [0.3, 0.6, 0.9, 0.9];
+function median(a) { if (!a.length) return null; const b = a.slice().sort((x, y) => x - y), m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; }
+function splitShares(catId, snap) {
+  const share = src => {
+    const runs = src ? Object.values(src.res).filter(x => x.time && x.pos > 0 && x.sp && x.sp.length) : [];
+    const n = Math.max(0, ...runs.map(x => x.sp.length - 1));
+    return { n: runs.length, s: Array.from({ length: n }, (_, j) => median(runs.filter(x => x.sp[j]).map(x => x.sp[j] / x.time))) };
+  };
+  const today = snap && !snap.fromQ ? share(snap) : { n: 0, s: [] };
+  return today.n >= 3 ? today : share((S.qsnaps || {})[catId]);
+}
+// Final/qualifying time ratio of today's finishers (for the optional "learn from today" setting).
+function todayGain(catId, R) {
+  const g = R.rows.filter(r => r.today && r.today.k === 'fin').map(r => { const q = qTime(catId, r); return q ? r.today.time / q : null; }).filter(Boolean);
+  return g.length >= 3 ? median(g) : null;
+}
 function project(catId, R) {
-  const gain = (+S.gain || 0) / 100, order = [];
+  const learned = S.learnGain ? todayGain(catId, R) : null, factor = learned || 1 - (+S.gain || 0) / 100, order = [];
+  const shares = splitShares(catId, R.snap);
   for (const r of R.rows) {
-    r.ppos = 0; r.ptime = null; r.pred = false;
+    r.ppos = 0; r.ptime = null; r.pred = false; r.src = '';
     if (!r.today || r.today.k === 'out') continue;
     if (r.today.k === 'fin') r.ptime = r.today.time;
-    else { const q = qTime(catId, r); r.ptime = q ? Math.round(q * (1 - gain)) : null; r.pred = true; }
+    else {
+      const q = qTime(catId, r), qPred = q ? q * factor : null, x = R.snap && R.snap.res[r.nr], sp = (x && x.sp) || [];
+      let j = -1;
+      for (let i = Math.min(sp.length, shares.s.length) - 1; i >= 0; i--) if (sp[i] && shares.s[i]) { j = i; break; }
+      if (r.today.k === 'track' && j >= 0) {
+        const fromSplit = sp[j] / shares.s[j], w = SPLIT_W[Math.min(j, SPLIT_W.length - 1)];
+        r.ptime = Math.round(qPred ? w * fromSplit + (1 - w) * qPred : fromSplit); r.src = `split ${j + 1}`;
+      } else r.ptime = qPred ? Math.round(qPred) : null;
+      r.pred = true;
+    }
     order.push(r);
   }
   order.sort((a, b) => (a.ptime ?? 1e12) - (b.ptime ?? 1e12) || (a.today.pos || 1e6) - (b.today.pos || 1e6) || (a.so || 0) - (b.so || 0));
@@ -637,7 +675,7 @@ function project(catId, R) {
     const tie = !!((p && p.prank === r.prank) || (n && n.prank === r.prank));
     return { ...r, orig: r, rank: r.prank, total: r.ptotal, tie, cbSplit: !tie && !!((p && p.ptotal === r.ptotal) || (n && n.ptotal === r.ptotal)) };
   });
-  return { order, view, predicted: order.filter(r => r.pred && r.ptime).length, hasQ: !!(S.qsnaps && S.qsnaps[catId]) };
+  return { order, view, predicted: order.filter(r => r.pred && r.ptime).length, hasQ: !!(S.qsnaps && S.qsnaps[catId]), learned };
 }
 
 /* ---------- Title scenarios (before and during the final) ---------- */
@@ -781,7 +819,7 @@ function projCell(r) {
   if (t.k === 'fin') return `<span class="tag fin">${ord(t.pos)}</span> <span class="pts">+${r.pts}</span>${r.ppos !== t.pos ? `<span class="range">projected ${ord(r.ppos)}, +${r.ppts}</span>` : ''}`;
   const tag = t.k === 'track' ? '<span class="tag track">on track</span> ' : '';
   if (!r.ptime) return `${tag}<span class="tag tocome">to come</span><span class="range">no qualifying time</span>`;
-  return `${tag}<span class="tag tocome">≈${ord(r.ppos)}</span> <span class="pts pred">+${r.ppts}</span><span class="range">pred. ${fmtMs(r.ptime)}</span>`;
+  return `${tag}<span class="tag tocome">≈${ord(r.ppos)}</span> <span class="pts pred">+${r.ppts}</span><span class="range">pred. ${fmtMs(r.ptime)}${r.src ? ` (${r.src})` : ''}</span>`;
 }
 function standingsHtml(id, R) {
   const P = stdMode === 'proj' ? project(id, R) : null, proj = P && P.predicted > 0;
@@ -789,7 +827,7 @@ function standingsHtml(id, R) {
   const lead = rows[0], cset = new Set(R.contenders.length > 1 ? R.contenders : []);
   const prov = raceState(id) !== 'official' && S.snaps[id];
   const note = P && !proj ? `<p class="sub" style="padding:8px 16px">No predictions yet: ${P.hasQ ? 'every rider in the final is down.' : 'qualifying times not loaded.'} Showing current standings.</p>`
-    : proj ? `<p class="sub" style="padding:8px 16px">Projected: actual result once down, otherwise qualifying time −${S.gain}% (${P.predicted} riders predicted).</p>` : '';
+    : proj ? `<p class="sub" style="padding:8px 16px">Projected: actual result once down; on track, from the latest split; otherwise best qualifying time ${P.learned ? `× ${P.learned.toFixed(3)} (today's finishers)` : `−${S.gain}%`} (${P.predicted} riders predicted).</p>` : '';
   const body = rows.map((r, i) => {
     const key = keysOf(r)[0], pk = id + (proj ? 'p' : '') + key, was = prevRank[pk];
     const bump = was != null && was !== r.rank; prevRank[pk] = r.rank;
@@ -815,7 +853,7 @@ function raceHtml(id, R) {
   if (!R.snap) return `<p class="sub" style="padding:24px">No final start list and no qualifying times yet. Checking every 10–20 seconds.</p>`;
   const P = project(id, R), best = P.order.length && P.order[0].ptime;
   const timeCell = r => !r.ptime ? '<span class="sub">no qualifying time</span>'
-    : r.pred ? `<span class="sub">≈${fmtMs(r.ptime)}</span> <span class="prov">pred.</span>` : `<b>${fmtMs(r.ptime)}</b>`;
+    : r.pred ? `<span class="sub">≈${fmtMs(r.ptime)}</span> <span class="prov">${r.src ? r.src.replace('split ', 'S') : 'pred.'}</span>` : `<b>${fmtMs(r.ptime)}</b>`;
   const status = r => r.today.k === 'fin' ? `<span class="tag fin">down</span>` : r.today.k === 'track' ? '<span class="tag track">on track</span>' : '<span class="tag tocome">to come</span>';
   const rows = P.order.map(r => `<tr class="${r.pred ? '' : 'inrace'}"><td class="rk">${r.pred ? `<span class="sub">${r.ppos}</span>` : r.ppos}</td>
     <td><div class="nm">${esc(r.name)}${r.q2 ? ' <span class="prov">Q2?</span>' : ''}</div><div class="team">${esc(r.team || '')}</div></td><td>${esc(r.nat || '')}</td>
@@ -829,7 +867,7 @@ function raceHtml(id, R) {
     : CAT[id].scale === 'elite'
     ? `Final start list not out yet: top ${CAT[id].field} in qualifying, plus series top-30 riders who may get in through Q2 (<b>Q2?</b>; Q2 isn't in the timing feed, so their Q1 time is used). `
     : `Final start list not out yet: top ${CAT[id].field} in qualifying. `;
-  return `<p class="sub" style="padding:8px 16px">${head}predicted final time = best qualifying time (Q1/Q2) −${S.gain}% until the rider is down, then the actual time. Sorted by time.</p>
+  return `<p class="sub" style="padding:8px 16px">${head}predicted final time = best qualifying time (Q1/Q2) ${P.learned ? `× ${P.learned.toFixed(3)} (today's finishers)` : `−${S.gain}%`}; on track, updated at each split (S1–S4); actual time once down. Sorted by time.</p>
     <table class="st"><thead><tr><th class="num">Pos</th><th>Rider</th><th>Nat</th><th></th><th class="num">Final</th><th class="num">Gap</th><th class="num">Points</th></tr></thead>
     <tbody>${rows}${out}</tbody></table>`;
 }
@@ -998,7 +1036,7 @@ function renderSetup() {
     CATS.map(c => `<label>${c.name} final <input type="text" data-key="${c.id}" value="${esc(S.keys[c.id])}"></label>`).join('');
   $('#qkeyInputs').innerHTML = CATS.map(c => `<label>${c.name} qualifying <input type="text" data-qkey="${c.id}" value="${esc(S.qkeys[c.id])}"></label>`).join('')
     + CATS.filter(c => c.q2key).map(c => `<label>${c.name} Q2 <input type="text" data-q2key="${c.id}" value="${esc(S.q2keys[c.id] || '')}"></label>`).join('');
-  $('#gainIn').value = S.gain;
+  $('#gainIn').value = S.gain; $('#learnIn').checked = !!S.learnGain;
 }
 const stdFile = Object.assign(document.createElement('input'), { type: 'file', accept: '.pdf,.csv,.txt,application/pdf,text/csv,text/plain' });
 let stdFileCat = null;
@@ -1041,6 +1079,7 @@ $('#saveKeys').addEventListener('click', () => {
   document.querySelectorAll('[data-qkey]').forEach(i => { S.qkeys[i.dataset.qkey] = i.value.trim(); });
   document.querySelectorAll('[data-q2key]').forEach(i => { S.q2keys[i.dataset.q2key] = i.value.trim(); });
   const g = parseFloat($('#gainIn').value.replace(',', '.')); if (g >= 0 && g < 30) S.gain = g;
+  S.learnGain = $('#learnIn').checked;
   S.snaps = {}; S.qsnaps = {}; S.q2snaps = {}; Object.keys(live).forEach(k => delete live[k]); Object.keys(qlive).forEach(k => delete qlive[k]); save();
   toast('Timing saved; checking again now');
 });
@@ -1086,7 +1125,7 @@ setInterval(() => {
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 7;
+const APP_VERSION = 8;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
