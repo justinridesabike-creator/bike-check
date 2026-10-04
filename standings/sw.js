@@ -1,5 +1,5 @@
 // Offline cache: bump VERSION (and APP_VERSION in index.html) whenever app files change.
-const VERSION = 'standings-v10';
+const VERSION = 'standings-v11';
 const FILES = ['./', 'index.html', 'manifest.json', 'icon-180.png', 'icon-512.png',
   '../eighty/vendor/pdf.min.js', '../eighty/vendor/pdf.worker.min.js'];
 
