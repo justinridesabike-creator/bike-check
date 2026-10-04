@@ -567,7 +567,8 @@ function statusOf(snap, nr) {
   // "NA" (not started) becomes DNS once a later starter has gone, or 10 min after the scheduled start (event local time).
   if (x && /^NA$/i.test(x.st) && !snap.onTrack.includes(nr)) {
     const me = snap.riders.find(r => r.nr === nr), so = me ? me.so : null;
-    const laterGone = so != null && snap.riders.some(r => r.so > so && snap.res[r.nr] && snap.res[r.nr].st && !/^NA$/i.test(snap.res[r.nr].st));
+    // Only a later rider who actually started counts (a later DNS, e.g. Pinkerton at Lake Placid, says nothing about this rider).
+    const laterGone = so != null && snap.riders.some(r => r.so > so && snap.res[r.nr] && /inrace|finish|dnf|dsq|dq|abd/i.test(snap.res[r.nr].st || ''));
     // Start delays are common, so the clock alone never makes a DNS while the feed still lists the rider as next to start.
     const listedNext = (snap.next || []).includes(nr);
     if (laterGone || (!listedNext && x.est && eventMsOfDay() > x.est + 600000)) return { k: 'out', label: 'DNS' };
@@ -1500,7 +1501,7 @@ setInterval(() => {
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 26;
+const APP_VERSION = 27;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
