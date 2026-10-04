@@ -159,7 +159,8 @@ td.proj { color: var(--accent); font-weight: 700; }
 .otcard .clock { font-size: 18px; font-weight: 800; }
 .otcard .gap.ahead { color: var(--up); font-weight: 700; } .otcard .gap.behind { color: var(--down); font-weight: 700; }
 .notes-foot { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 4px; }
-.inview-line { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.inview-line { font-size: 13px; color: #2563eb; font-weight: 800; margin-top: 2px; font-variant-numeric: tabular-nums; }
+@media (prefers-color-scheme: dark) { .inview-line { color: #60a5fa; } }
 .otcard.inview { background: #dbeafe; border-left-color: #2563eb; box-shadow: 0 0 0 2px #2563eb; }
 .otcard.inview .inview-line { display: inline-block; margin: 4px 0 2px; padding: 3px 10px; border-radius: 99px; background: #2563eb; color: #fff;
   font-size: 14px; font-weight: 800; letter-spacing: .5px; animation: blink 1.2s infinite; }
@@ -1451,7 +1452,7 @@ setInterval(() => {
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 23;
+const APP_VERSION = 24;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
