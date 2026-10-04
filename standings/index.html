@@ -486,7 +486,8 @@ function statusOf(snap, nr) {
   if (x && OUT_RE.test(x.st)) return { k: 'out', label: x.st.toUpperCase().match(OUT_RE)[0] };
   if (x && x.pos > 0 && (/finish/i.test(x.st) || x.inRes)) return { k: 'fin', pos: x.pos, time: x.time };
   if (snap.onTrack.includes(nr) || (x && x.sp && x.sp.length)) return { k: 'track' };
-  if (x && x.st && !/start|wait|not/i.test(x.st)) return { k: 'track', label: x.st };
+  // Live feed: "NA" = not started yet, "InRace" = on track (with the splits done so far), then Finished/DNF/DSQ/DNS.
+  if (x && /inrace|running|ontrack|on track/i.test(x.st)) return { k: 'track', label: x.st };
   return { k: 'tocome' };
 }
 function doneCount(snap) {
@@ -1184,7 +1185,7 @@ setInterval(() => {
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 11;
+const APP_VERSION = 12;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
