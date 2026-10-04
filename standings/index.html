@@ -214,9 +214,10 @@ function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;'
 
 /* ---------- Categories and storage ---------- */
 const CATS = [
-  // key: final, qkey: qualifying; field: riders in the final (2026 rounds), used until the final's start list is out.
-  { id: 'ME', name: 'Men Elite', scale: 'elite', key: '3', qkey: '2', field: 30 },
-  { id: 'WE', name: 'Women Elite', scale: 'elite', key: '6', qkey: '5', field: 15 },
+  // key: final, qkey: qualifying (Q1), q2key: Q2; field: riders in the final, used until the final's start list is out.
+  // Elite finals are the Q1 top q1n plus the Q2 top q2n (Lake Placid start lists).
+  { id: 'ME', name: 'Men Elite', scale: 'elite', key: '3', qkey: '2', q2key: '91', field: 30, q1n: 20, q2n: 10 },
+  { id: 'WE', name: 'Women Elite', scale: 'elite', key: '6', qkey: '5', q2key: '92', field: 15, q1n: 10, q2n: 5 },
   { id: 'MJ', name: 'Men Junior', scale: 'junior', key: '8', qkey: '7', field: 20 },
   { id: 'WJ', name: 'Women Junior', scale: 'junior', key: '10', qkey: '9', field: 10 },
 ];
@@ -234,6 +235,7 @@ const DEFAULT_STD = {"ME":[{"rank":1,"name":"VERMETTE Asa","nat":"USA","pts":134
 function blank() {
   return { event: '20261002_mtb', keys: Object.fromEntries(CATS.map(c => [c.id, c.key])),
     qkeys: Object.fromEntries(CATS.map(c => [c.id, c.qkey])), qsnaps: {}, gain: 2.5,
+    q2keys: Object.fromEntries(CATS.filter(c => c.q2key).map(c => [c.id, c.q2key])), q2snaps: {},
     points: JSON.parse(JSON.stringify(DEFAULT_POINTS)), standings: {}, snaps: {}, official: {} };
 }
 function load() {
@@ -498,14 +500,16 @@ async function pollQ(catId) {
   if (ls.busy) return;
   ls.busy = true;
   try {
-    const d = await crGet(`uci/dh/race/${S.event}/${S.qkeys[catId]}`);
-    ls.error = null;
-    if (d) {
-      const snap = snapshot(d), old = S.qsnaps[catId];
-      if (!old || (doneCount(snap) >= doneCount(old) && JSON.stringify(old.res) !== JSON.stringify(snap.res))) { S.qsnaps[catId] = snap; save(); renderSoon(); }
+    for (const [keys, store] of [[S.qkeys, 'qsnaps'], [S.q2keys, 'q2snaps']]) {
+      if (!keys[catId]) continue;
+      const d = await crGet(`uci/dh/race/${S.event}/${keys[catId]}`);
+      if (!d) continue;
+      const snap = snapshot(d), old = S[store][catId];
+      if (!old || (doneCount(snap) >= doneCount(old) && JSON.stringify(old.res) !== JSON.stringify(snap.res))) { S[store][catId] = snap; save(); renderSoon(); }
     }
+    ls.error = null;
   } catch (e) { ls.error = e.message; }
-  finally { ls.busy = false; ls.nextAt = Date.now() + (S.qsnaps[catId] ? 120000 : 20000); }
+  finally { ls.busy = false; ls.nextAt = Date.now() + (S.qsnaps[catId] && (!S.q2keys[catId] || S.q2snaps[catId]) ? 120000 : 20000); }
 }
 setInterval(() => {
   if (document.hidden) return;
@@ -574,10 +578,16 @@ function qField(catId) {
   const q = S.qsnaps && S.qsnaps[catId];
   if (!q) return null;
   const c = qFieldCache[catId];
-  if (c && c.q === q && c.std === S.standings[catId]) return c.snap;
-  const top = qualified(q).slice(0, CAT[catId].field), riders = top.map(o => o.r);
+  const q2 = (S.q2snaps || {})[catId] || null, cat = CAT[catId];
+  if (c && c.q === q && c.q2 === q2 && c.std === S.standings[catId]) return c.snap;
   const std = S.standings[catId];
-  if (CAT[catId].scale === 'elite' && std) {
+  let riders;
+  if (cat.q2n && q2) {
+    riders = qualified(q).slice(0, cat.q1n).map(o => o.r);
+    const inField = new Set(riders.flatMap(keysOf));
+    riders.push(...qualified(q2).filter(o => !keysOf(o.r).some(k => inField.has(k))).slice(0, cat.q2n).map(o => ({ ...o.r, viaQ2: true })));
+  } else riders = qualified(q).slice(0, cat.field).map(o => o.r);
+  if (cat.q2n && !q2 && std) {
     const seeded = new Set(), inField = new Set(riders.flatMap(keysOf));
     std.rows.filter(r => r.rank <= 30).forEach(r => keysOf(r).forEach(k => seeded.add(k)));
     for (const r of q.riders) {
@@ -586,17 +596,21 @@ function qField(catId) {
     }
   }
   const snap = { at: q.at, riders: riders.map((r, i) => ({ ...r, so: riders.length - i })), res: {}, onTrack: [], fromQ: true };
-  qFieldCache[catId] = { q, snap, std };
+  qFieldCache[catId] = { q, q2, snap, std };
   return snap;
 }
 const qIdx = new WeakMap();
+// Best qualifying time (Q1 or Q2).
 function qTime(catId, r) {
-  const q = S.qsnaps && S.qsnaps[catId];
-  if (!q) return null;
-  let m = qIdx.get(q);
-  if (!m) { m = new Map(); for (const o of qualified(q)) keysOf(o.r).forEach(k => m.set(k, o.x.time)); qIdx.set(q, m); }
-  for (const k of keysOf(r)) if (m.has(k)) return m.get(k);
-  return null;
+  let best = null;
+  for (const q of [(S.qsnaps || {})[catId], (S.q2snaps || {})[catId]]) {
+    if (!q) continue;
+    let m = qIdx.get(q);
+    if (!m) { m = new Map(); for (const o of qualified(q)) keysOf(o.r).forEach(k => m.set(k, o.x.time)); qIdx.set(q, m); }
+    const t = keysOf(r).map(k => m.get(k)).find(Boolean);
+    if (t && (best == null || t < best)) best = t;
+  }
+  return best;
 }
 // Projected finish: actual time once down, else qualifying time minus S.gain %. Riders with no qualifying time go last.
 function project(catId, R) {
@@ -810,10 +824,12 @@ function raceHtml(id, R) {
     <td class="num tot">${r.pred ? `<span class="sub">${r.ppts}</span>` : r.ppts}</td></tr>`).join('');
   const out = R.rows.filter(r => r.today && r.today.k === 'out').map(r => `<tr><td class="rk"></td><td><div class="nm">${esc(r.name)}</div><div class="team">${esc(r.team || '')}</div></td>
     <td>${esc(r.nat || '')}</td><td>${todayCell(r)}</td><td></td><td></td><td class="num">0</td></tr>`).join('');
-  const head = !R.snap.fromQ ? '' : CAT[id].scale === 'elite'
+  const cat = CAT[id], q2in = cat.q2n && (S.q2snaps || {})[id];
+  const head = !R.snap.fromQ ? '' : q2in ? `Final start list not in timing yet: Q1 top ${cat.q1n} + Q2 top ${cat.q2n}. `
+    : CAT[id].scale === 'elite'
     ? `Final start list not out yet: top ${CAT[id].field} in qualifying, plus series top-30 riders who may get in through Q2 (<b>Q2?</b>; Q2 isn't in the timing feed, so their Q1 time is used). `
     : `Final start list not out yet: top ${CAT[id].field} in qualifying. `;
-  return `<p class="sub" style="padding:8px 16px">${head}predicted final time = qualifying time −${S.gain}% until the rider is down, then the actual time. Sorted by time.</p>
+  return `<p class="sub" style="padding:8px 16px">${head}predicted final time = best qualifying time (Q1/Q2) −${S.gain}% until the rider is down, then the actual time. Sorted by time.</p>
     <table class="st"><thead><tr><th class="num">Pos</th><th>Rider</th><th>Nat</th><th></th><th class="num">Final</th><th class="num">Gap</th><th class="num">Points</th></tr></thead>
     <tbody>${rows}${out}</tbody></table>`;
 }
@@ -956,7 +972,7 @@ function podiumHtml(id) {
     ${alive.length > 3 ? `<div class="line">Most likely on the podium: ${likely.map(r => `${esc(r.name)} ${pct(r.pod, r.locked)}`).join(' · ')}</div>` : ''}
     ${projLine(id)}
     ${P.assumed ? '<div class="line sub">No start list or qualifying yet, so every rider in the standings is assumed to race.</div>'
-      : P.R.snap.fromQ ? `<div class="line sub">Final start list not out yet: field is the top ${CAT[id].field} in qualifying${CAT[id].scale === 'elite' ? ', plus series top-30 riders who may get in through Q2' : ''}.</div>` : ''}</div>
+      : P.R.snap.fromQ ? `<div class="line sub">Final start list not in timing yet: field is ${CAT[id].q2n && (S.q2snaps || {})[id] ? `Q1 top ${CAT[id].q1n} + Q2 top ${CAT[id].q2n}` : `the top ${CAT[id].field} in qualifying${CAT[id].scale === 'elite' ? ', plus series top-30 riders who may get in through Q2' : ''}`}.</div>` : ''}</div>
     <table class="st"><thead><tr><th class="num">Now</th><th>Rider / Team</th><th class="num">Total</th><th>Today</th><th class="num">Podium</th><th class="num hide-sm">Title</th><th>What it takes</th></tr></thead>
     <tbody>${body}</tbody></table>
     <p class="footer-note">Only riders who can still reach the top 3 are listed. <b>What it takes</b> is exact from the points table (a tie on points is never counted as sure, since countback then depends on today's places too).
@@ -980,7 +996,8 @@ function renderSetup() {
   }).join('');
   $('#keyInputs').innerHTML = `<label>Event <input type="text" id="evIn" value="${esc(S.event)}" style="width:160px !important"></label>` +
     CATS.map(c => `<label>${c.name} final <input type="text" data-key="${c.id}" value="${esc(S.keys[c.id])}"></label>`).join('');
-  $('#qkeyInputs').innerHTML = CATS.map(c => `<label>${c.name} qualifying <input type="text" data-qkey="${c.id}" value="${esc(S.qkeys[c.id])}"></label>`).join('');
+  $('#qkeyInputs').innerHTML = CATS.map(c => `<label>${c.name} qualifying <input type="text" data-qkey="${c.id}" value="${esc(S.qkeys[c.id])}"></label>`).join('')
+    + CATS.filter(c => c.q2key).map(c => `<label>${c.name} Q2 <input type="text" data-q2key="${c.id}" value="${esc(S.q2keys[c.id] || '')}"></label>`).join('');
   $('#gainIn').value = S.gain;
 }
 const stdFile = Object.assign(document.createElement('input'), { type: 'file', accept: '.pdf,.csv,.txt,application/pdf,text/csv,text/plain' });
@@ -1022,8 +1039,9 @@ $('#saveKeys').addEventListener('click', () => {
   S.event = $('#evIn').value.trim() || S.event;
   document.querySelectorAll('[data-key]').forEach(i => { S.keys[i.dataset.key] = i.value.trim(); });
   document.querySelectorAll('[data-qkey]').forEach(i => { S.qkeys[i.dataset.qkey] = i.value.trim(); });
+  document.querySelectorAll('[data-q2key]').forEach(i => { S.q2keys[i.dataset.q2key] = i.value.trim(); });
   const g = parseFloat($('#gainIn').value.replace(',', '.')); if (g >= 0 && g < 30) S.gain = g;
-  S.snaps = {}; S.qsnaps = {}; Object.keys(live).forEach(k => delete live[k]); Object.keys(qlive).forEach(k => delete qlive[k]); save();
+  S.snaps = {}; S.qsnaps = {}; S.q2snaps = {}; Object.keys(live).forEach(k => delete live[k]); Object.keys(qlive).forEach(k => delete qlive[k]); save();
   toast('Timing saved; checking again now');
 });
 
@@ -1068,7 +1086,7 @@ setInterval(() => {
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 6;
+const APP_VERSION = 7;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
