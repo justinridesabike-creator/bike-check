@@ -700,20 +700,59 @@ function splitShares(catId, snap) {
 // final) are dropped: anything more than 2.5 robust standard deviations (MAD, at least 1%) from the median, then the
 // rest is averaged. Backtest on the 2026 finals, riders still to start: median miss 5.1 s with 3-5 riders down,
 // 2.7 s with 6-10, 2.1 s with 11+ (fixed 2.5%: 6.9, 3.6, 4.0 s; plain average: worse than fixed).
-function todayGain(catId, R) {
-  const g = R.rows.filter(r => r.today && r.today.k === 'fin').map(r => { const q = qTime(catId, r); return q ? r.today.time / q : null; }).filter(Boolean);
-  if (g.length < 3) return null;
-  const m = median(g), tol = Math.max(2.5 * 1.4826 * median(g.map(x => Math.abs(x - m))), 0.01);
-  const kept = g.filter(x => Math.abs(x - m) <= tol);
-  return { f: kept.reduce((a, b) => a + b, 0) / kept.length, n: kept.length, out: g.length - kept.length };
+// Robust mean: drop values more than 2.5 robust SDs (MAD, at least 1%) from the median, average the rest.
+function robust(g) {
+  if (!g.length) return null;
+  const m = median(g), tol = Math.max(2.5 * 1.4826 * median(g.map(x => Math.abs(x - m))), 0.01), kept = g.filter(x => Math.abs(x - m) <= tol);
+  return { v: kept.reduce((a, b) => a + b, 0) / kept.length, n: kept.length, out: g.length - kept.length };
 }
+const secOf = sp => sp.map((t, i) => i ? t - sp[i - 1] : t);
+// Finished runs today paired with the same rider's best qualifying run: [{ q: {time, sp}, f: {time, sp} }].
+function finPairs(catId, snap) {
+  if (!snap || snap.fromQ) return [];
+  const out = [];
+  for (const r of snap.riders) {
+    const x = snap.res[r.nr];
+    if (!x || !(x.pos > 0) || !x.time || !/finish/i.test(x.st)) continue;
+    const q = qRun(catId, r);
+    if (q) out.push({ q, f: x });
+  }
+  return out;
+}
+// Today's gain over qualifying, overall and per section (start-S1 ... S4-finish), outliers dropped.
+// From this final once 3 riders are down; before that from the earlier finals today (all categories move together).
+// Backtest (2026 finals, today's running order): riders still to start, median miss 2.85 s vs 3.06 s (one overall gain).
+const learnCache = {};
+function learned(catId, R) {
+  const key = CATS.map(c => S.snaps[c.id] ? S.snaps[c.id].at : 0).join('|') + '|' + catId;
+  if (learnCache[catId] && learnCache[catId].key === key) return learnCache[catId].v;
+  const build = pairs => {
+    const tot = robust(pairs.map(p => p.f.time / p.q.time));
+    const full = pairs.filter(p => p.q.sp && p.f.sp && p.q.sp.length >= 5 && p.f.sp.length >= 5 && p.q.sp.slice(0, 5).every(Boolean) && p.f.sp.slice(0, 5).every(Boolean));
+    const sec = full.length >= 3 ? [0, 1, 2, 3, 4].map(k => robust(full.map(p => secOf(p.f.sp)[k] / secOf(p.q.sp)[k]))) : null;
+    return { f: tot.v, n: tot.n, out: tot.out, sec: sec && sec.map(x => x.v) };
+  };
+  const own = finPairs(catId, R.snap);
+  let v = null;
+  if (own.length >= 3) v = { ...build(own), src: 'today' };
+  else {
+    const prior = CATS.filter(c => c.id !== catId).flatMap(c => finPairs(c.id, S.snaps[c.id]));
+    if (prior.length >= 3) v = { ...build(prior), src: 'earlier' };
+  }
+  learnCache[catId] = { key, v };
+  return v;
+}
+function todayGain(catId, R) { return learned(catId, R); }
 function gainTxt(P) {
-  if (!P.learned) return `−${S.gain}%${S.adaptGain ? ' (until 3 riders are down)' : ''}`;
-  const pc = (1 - P.learned.f) * 100;
-  return `${pc >= 0 ? '−' : '+'}${Math.abs(pc).toFixed(1)}% (today: ${P.learned.n} riders${P.learned.out ? `, ${P.learned.out} outlier${P.learned.out > 1 ? 's' : ''} ignored` : ''})`;
+  if (!P.learned) return `−${S.gain}%${S.adaptGain ? ' (until riders are down today)' : ''}`;
+  const L = P.learned, pc = (1 - L.f) * 100, sg = L.sec ? ` · by section ${L.sec.map(x => (x <= 1 ? '−' : '+') + Math.abs((1 - x) * 100).toFixed(1)).join(' / ')}%` : '';
+  return `${pc >= 0 ? '−' : '+'}${Math.abs(pc).toFixed(1)}% (${L.src === 'today' ? 'this final' : 'earlier finals today'}: ${L.n} riders${L.out ? `, ${L.out} outlier${L.out > 1 ? 's' : ''} ignored` : ''})${sg}`;
 }
 function project(catId, R) {
   const learned = S.adaptGain ? todayGain(catId, R) : null, factor = learned ? learned.f : 1 - (+S.gain || 0) / 100, order = [];
+  // Section model: rest of the run = each remaining section of the rider's own qualifying run x today's gain there.
+  const secR = learned && learned.sec, qsecOK = qr => secR && qr && qr.sp && qr.sp.length >= 5 && qr.sp.slice(0, 5).every(Boolean);
+  const restBySection = (qr, j) => secOf(qr.sp.slice(0, 5)).reduce((a, t, k) => a + (k > j ? t * secR[k] : 0), 0);
   const shares = splitShares(catId, R.snap);
   for (const r of R.rows) {
     r.ppos = 0; r.ptime = null; r.pred = false; r.src = '';
@@ -727,8 +766,11 @@ function project(catId, R) {
         const fromSplit = sp[j] / shares.s[j], w = SPLIT_W[Math.min(j, SPLIT_W.length - 1)];
         const blend = qPred ? w * fromSplit + (1 - w) * qPred : fromSplit, qs = qr && qr.sp && qr.sp[j];
         const ownPace = qs ? sp[j] + (q - qs) * (sp[j] / qs) : null;
-        r.ptime = Math.round(ownPace ? (blend + ownPace) / 2 : blend); r.src = `split ${j + 1}`;
-      } else r.ptime = qPred ? Math.round(qPred) : null;
+        const app = ownPace ? (blend + ownPace) / 2 : blend;
+        // Blend with the section model; weights per split from the backtest (median miss 2.1/1.4/0.9/0.4 s at S1-S4).
+        const ws = [0.5, 0.5, 0.5, 0.25][Math.min(j, 3)];
+        r.ptime = Math.round(qsecOK(qr) ? (1 - ws) * app + ws * (sp[j] + restBySection(qr, j)) : app); r.src = `split ${j + 1}`;
+      } else r.ptime = qsecOK(qr) ? Math.round(restBySection(qr, -1)) : qPred ? Math.round(qPred) : null;
       r.pred = true;
     }
     order.push(r);
@@ -1252,7 +1294,7 @@ setInterval(() => {
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 16;
+const APP_VERSION = 17;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
