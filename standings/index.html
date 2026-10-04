@@ -609,22 +609,25 @@ function qField(catId) {
   return snap;
 }
 const qIdx = new WeakMap();
-// Best qualifying time (Q1 or Q2).
-function qTime(catId, r) {
+// Best qualifying run (Q1 or Q2): { time, sp }.
+function qRun(catId, r) {
   let best = null;
   for (const q of [(S.qsnaps || {})[catId], (S.q2snaps || {})[catId]]) {
     if (!q) continue;
     let m = qIdx.get(q);
-    if (!m) { m = new Map(); for (const o of qualified(q)) keysOf(o.r).forEach(k => m.set(k, o.x.time)); qIdx.set(q, m); }
-    const t = keysOf(r).map(k => m.get(k)).find(Boolean);
-    if (t && (best == null || t < best)) best = t;
+    if (!m) { m = new Map(); for (const o of qualified(q)) keysOf(o.r).forEach(k => m.set(k, o.x)); qIdx.set(q, m); }
+    const x = keysOf(r).map(k => m.get(k)).find(Boolean);
+    if (x && (best == null || x.time < best.time)) best = x;
   }
   return best;
 }
+function qTime(catId, r) { const x = qRun(catId, r); return x ? x.time : null; }
 // Projected finish: actual time once down, else qualifying time minus S.gain %. Riders with no qualifying time go last.
 // On track, from each split: elapsed time / (share of the run done at that split), the share being the median of
 // today's finishers (qualifying runs until 3 are down), blended with the qualifying-based time.
-// Backtest on the 2026 finals: median miss 2.4 s at split 1, 1.6 s at 2, 0.9 s at 3, 0.5 s at 4 (4.2 s from Q alone).
+// That is averaged 50/50 with "own pace": actual time to the split plus the rest of the rider's own qualifying run,
+// scaled by how their pace so far compares with that qualifying run.
+// Backtest on the 2026 finals: median miss 2.9 s at split 1, 1.8 s at 2, 1.1 s at 3, 0.4 s at 4 (4.2 s from Q alone).
 const SPLIT_W = [0.3, 0.6, 0.9, 0.9];
 function median(a) { if (!a.length) return null; const b = a.slice().sort((x, y) => x - y), m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; }
 function splitShares(catId, snap) {
@@ -649,12 +652,14 @@ function project(catId, R) {
     if (!r.today || r.today.k === 'out') continue;
     if (r.today.k === 'fin') r.ptime = r.today.time;
     else {
-      const q = qTime(catId, r), qPred = q ? q * factor : null, x = R.snap && R.snap.res[r.nr], sp = (x && x.sp) || [];
+      const qr = qRun(catId, r), q = qr ? qr.time : null, qPred = q ? q * factor : null, x = R.snap && R.snap.res[r.nr], sp = (x && x.sp) || [];
       let j = -1;
       for (let i = Math.min(sp.length, shares.s.length) - 1; i >= 0; i--) if (sp[i] && shares.s[i]) { j = i; break; }
       if (r.today.k === 'track' && j >= 0) {
         const fromSplit = sp[j] / shares.s[j], w = SPLIT_W[Math.min(j, SPLIT_W.length - 1)];
-        r.ptime = Math.round(qPred ? w * fromSplit + (1 - w) * qPred : fromSplit); r.src = `split ${j + 1}`;
+        const blend = qPred ? w * fromSplit + (1 - w) * qPred : fromSplit, qs = qr && qr.sp && qr.sp[j];
+        const ownPace = qs ? sp[j] + (q - qs) * (sp[j] / qs) : null;
+        r.ptime = Math.round(ownPace ? (blend + ownPace) / 2 : blend); r.src = `split ${j + 1}`;
       } else r.ptime = qPred ? Math.round(qPred) : null;
       r.pred = true;
     }
@@ -1125,7 +1130,7 @@ setInterval(() => {
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 8;
+const APP_VERSION = 9;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
