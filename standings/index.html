@@ -125,6 +125,16 @@ table.st tr.r-out td { color: var(--muted); }
 .tag.pred { background: transparent; border: 1px dashed var(--muted); color: var(--muted); font-style: normal; }
 table.st.compact td { padding: 6px 5px; }
 td.nowc { white-space: nowrap; font-style: normal; }
+.otbox { margin: 10px 16px 4px; padding: 12px 14px; border: 2px solid var(--ok); border-radius: 14px; background: var(--card); }
+.otbox h3 { margin: 0 0 8px; font-size: 16px; display: flex; gap: 10px; align-items: center; }
+.otcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.otcard { background: var(--track-bg); border-radius: 12px; padding: 10px 12px; border-left: 5px solid var(--ok); }
+.otcard .nm { font-size: 17px; }
+.otcard .row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.otcard .split { font-size: 22px; font-weight: 800; color: var(--ok); }
+.otcard .clock { font-size: 20px; font-weight: 800; }
+.otcard .gap.ahead { color: var(--up); font-weight: 800; } .otcard .gap.behind { color: var(--down); font-weight: 800; }
+.otnext { margin-top: 8px; font-size: 13px; color: var(--muted); }
 .nowpos { display: inline-block; min-width: 40px; padding: 3px 7px; border-radius: 8px; font-size: 16px; font-weight: 800; font-style: normal;
   background: var(--accent); color: var(--accent-ink); }
 .nowpos.trk { background: var(--ok); color: #fff; }
@@ -471,7 +481,7 @@ function snapshot(d) {
   for (const x of d.Results || []) {
     const prev = res[x.RaceNr];
     if (prev && (prev.run || 0) > (x.Run || 0)) continue;
-    res[x.RaceNr] = { run: x.Run, pos: x.Position, st: x.Status || '', time: x.RaceTime, inRes: x.InResult, sp: splitsOf(x), spPos: (x.Times || []).map(p => (p && p.Position) || null) };
+    res[x.RaceNr] = { run: x.Run, pos: x.Position, st: x.Status || '', time: x.RaceTime, inRes: x.InResult, sp: splitsOf(x), spPos: (x.Times || []).map(p => (p && p.Position) || null), spGap: (x.Times || []).map(p => (p && p.TimeGap != null) ? p.TimeGap : null) };
   }
   const nrOf = e => (e && typeof e === 'object') ? (e.RaceNr ?? e.Bib ?? e.Nr) : e;
   const onTrack = (d.OnTrack || []).map(nrOf).filter(x => x != null);
@@ -481,7 +491,8 @@ function snapshot(d) {
     const sp = splitsOf(e), cur = res[e.RaceNr];
     if (sp.length && (!cur || (cur.sp || []).length < sp.length) && !(cur && cur.time && cur.pos > 0)) res[e.RaceNr] = { ...(cur || { run: e.Run, pos: 0, st: e.Status || '' }), sp, spPos: (e.Times || []).map(p => (p && p.Position) || null) };
   }
-  return { at: Date.now(), riders, res, onTrack };
+  const next = (d.NextToStart || []).map(nrOf).filter(x => x != null);
+  return { at: Date.now(), riders, res, onTrack, next };
 }
 // Elapsed time at each timing point (the last one is the finish); null where missing.
 function splitsOf(x) { const t = (x.Times || []).map(p => (p && p.RaceTime) || null); while (t.length && t[t.length - 1] == null) t.pop(); return t; }
@@ -769,6 +780,7 @@ function fmtMs(ms) {
   const m = Math.floor(ms / 60000), s = (ms % 60000) / 1000;
   return `${m}:${s.toFixed(3).padStart(6, '0')}`;
 }
+function fmtClock(ms) { const m = Math.floor(ms / 60000), s = Math.floor(ms % 60000 / 1000), t = Math.floor(ms % 1000 / 100); return `${m}:${String(s).padStart(2, '0')}.${t}`; }
 function ago(t) { if (!t) return 'never'; const s = Math.round((Date.now() - t) / 1000); return s < 60 ? `${s}s ago` : `${Math.round(s / 60)} min ago`; }
 function warnHtml(catIds) {
   const msgs = [];
@@ -935,7 +947,26 @@ function raceHtml(id, R) {
     return `<tr class="${c}"><td class="rk">${rankTxt(r)}</td><td class="mv">${mv}</td><td><div class="nm">${esc(r.name)}</div></td>
       <td class="num">${today}</td><td class="num tot">${r.pred && r.ppts ? '≈' : ''}${r.total}</td><td class="num hide-sm">${r === lead ? '' : '−' + (lead.total - r.total)}</td></tr>`;
   }).join('');
-  return `<p class="sub" style="padding:8px 16px 0">${head}Predicted time = best qualifying time (Q1/Q2) ${gainTxt(P)}; on track, updated at each split (S1–S4); actual time once down.</p>
+  // On-track box: riders on course, furthest down the hill first.
+  const nameOf = nr => { const r = R.rows.find(x => x.nr === nr); return r ? esc(r.name) : '#' + nr; };
+  const onc = P.order.filter(r => r.today.k === 'track').map(r => {
+    const x = R.snap.res[r.nr] || {}, sp = x.sp || [];
+    let j = -1; for (let i = sp.length - 1; i >= 0; i--) if (sp[i]) { j = i; break; }
+    return { r, x, j };
+  }).sort((a, b) => b.j - a.j || (b.x.time || 0) - (a.x.time || 0));
+  const card = ({ r, x, j }) => {
+    const gap = j >= 0 && x.spGap ? x.spGap[j] : null, pos = j >= 0 && x.spPos ? x.spPos[j] : null;
+    const gapTxt = gap == null ? '' : gap <= 0 ? `<span class="gap ahead">${pos === 1 ? 'fastest' : ''} ${gap < 0 ? '−' + (Math.abs(gap) / 1000).toFixed(2) : ''}</span>` : `<span class="gap behind">+${(gap / 1000).toFixed(2)}</span>`;
+    const clock = x.time > 0 ? `<span class="clock" data-clock="${x.time}" data-at="${R.snap.at}">${fmtClock(x.time)}</span>` : '<span class="sub">starting</span>';
+    return `<div class="otcard"><div class="row"><span class="nm">${esc(r.name)}</span>${clock}</div>
+      <div class="row"><span class="split">${j >= 0 ? 'S' + (j + 1) : 'start'}</span>${j >= 0 ? `<span>${fmtMs(x.sp[j])}${pos ? ` · <b>${ord(pos)}</b>` : ''}</span>${gapTxt}` : '<span class="sub">no split yet</span>'}</div>
+      <div class="row"><span class="sub">predicted</span><span>${r.ptime ? '≈' + fmtMs(r.ptime) : '—'}</span><b>≈${ord(r.ppos)}</b></div></div>`;
+  };
+  const next = (R.snap.next || []).slice(0, 3).map(nameOf);
+  const otbox = R.snap.fromQ ? '' : `<div class="otbox"><h3><span class="tag track">ON TRACK</span>${onc.length ? `${onc.length} rider${onc.length > 1 ? 's' : ''} on course` : 'Nobody on course'}</h3>
+    ${onc.length ? `<div class="otcards">${onc.map(card).join('')}</div>` : ''}
+    ${next.length ? `<div class="otnext">Next to start: <b>${next.join('</b>, <b>')}</b></div>` : ''}</div>`;
+  return `${otbox}<p class="sub" style="padding:8px 16px 0">${head}Predicted time = best qualifying time (Q1/Q2) ${gainTxt(P)}; on track, updated at each split (S1–S4); actual time once down.</p>
     <div class="legend"><span><i class="lf"></i>Finished: actual time</span><span><i class="lt"></i>On track: from latest split</span><span><i class="lp"></i>Predicted from qualifying</span><span><b>Pred.</b> = predicted final place · <b>Now</b> = actual place now (finished) or at the latest split (on track)</span></div>
     <div class="race-grid">
       <div><h3>Final: live + predicted finish order</h3><div class="wrap"><table class="st"><thead><tr><th class="num">Pred.</th><th class="ctr">Now</th><th>Rider</th><th class="hide-sm">Nat</th><th></th><th class="num">Final</th><th class="num">Gap</th><th class="num">Pts</th></tr></thead>
@@ -1194,12 +1225,16 @@ function renderSoon() {
   const wait = 2000 - (Date.now() - lastTapAt);
   if (wait > 0) renderTimer = setTimeout(renderSoon, wait); else rerender();
 }
+// Running clocks on the on-track cards: feed time + time since that response.
+setInterval(() => {
+  document.querySelectorAll('[data-clock]').forEach(el => { const t = +el.dataset.clock + (Date.now() - +el.dataset.at); if (t < 15 * 60000) el.textContent = fmtClock(t); });
+}, 100);
 setInterval(() => {
   if (view === 'cat') { updateSub(); $('#catState').innerHTML = stateBadge(curCat); }
   if (view === 'home') document.querySelectorAll('.card').forEach(c => { const b = c.querySelector('.state'); if (b) b.outerHTML = stateBadge(c.dataset.cat); });
 }, 1000);
 
-const APP_VERSION = 13;
+const APP_VERSION = 14;
 $('#verTag').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
