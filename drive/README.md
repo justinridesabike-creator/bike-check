@@ -11,9 +11,11 @@ Do this once, on a computer if possible (it's easier than on the iPad).
    - Who has access: **Anyone**
 
    Click **Deploy**.
-5. Choose **showAppLink** in the function menu and click **Run**. Copy the link from the log at the bottom.
-   It looks like `https://script.google.com/macros/s/…/exec?key=…`.
-6. Send that link to the iPad (for example in a note or email to yourself), copy it there, open Bike Check,
+5. Click **Deploy > Manage deployments** and copy the **Web app URL**. It ends in `/exec`
+   (not `/dev`, which is a test address the app can't use).
+6. Choose **showAppLink** in the function menu and click **Run**. Add the `?key=…` it shows to the end of that URL.
+   The finished link looks like `https://script.google.com/macros/s/…/exec?key=…`.
+7. Send that link to the iPad (for example in a note or email to yourself), copy it there, open Bike Check,
    tap **Connect Google Drive** on the home screen and paste it.
 
 After that, **Download checks report** saves straight into Drive > Bike Checks. Saving again on the same day

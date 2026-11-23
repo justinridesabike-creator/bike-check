@@ -24,10 +24,12 @@ function setup() {
 
 function showAppLink() {
   const key = PropertiesService.getScriptProperties().getProperty('KEY');
-  const url = ScriptApp.getService().getUrl();
   if (!key) return Logger.log('Run setup() first.');
-  if (!url) return Logger.log('Deploy as a web app first (Deploy > New deployment > Web app).');
-  Logger.log('Paste this link into Bike Check:\n' + url + '?key=' + key);
+  // Run from the editor, getUrl() gives the test address ending in /dev, which the app
+  // can't use. The real address (ending in /exec) is under Deploy > Manage deployments.
+  Logger.log('1. Click Deploy > Manage deployments and copy the Web app URL (it ends in /exec).\n' +
+    '2. Add this to the end of it, with no spaces:  ?key=' + key + '\n' +
+    '3. Paste the whole thing into Bike Check > Connect Google Drive.');
 }
 
 function doPost(e) {
