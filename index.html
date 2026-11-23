@@ -121,6 +121,18 @@ table.sl tr.rider.dnf td.chk-td, table.sl tr.rider.out td.res { opacity: 1; }
   background: #16181d; color: #fff; padding: 12px 16px; border-radius: 12px; display: flex; gap: 14px; align-items: center;
   box-shadow: 0 6px 24px rgba(0,0,0,.25); z-index: 50; max-width: calc(100% - 32px); }
 .toast button { background: none; border: 0; color: #93b4ff; font-weight: 700; cursor: pointer; padding: 4px; }
+.event-box { background: var(--card); border: 1px solid var(--line); border-radius: 14px; margin-bottom: 18px; }
+.event-box summary { padding: 14px 16px; font-weight: 700; cursor: pointer; list-style: none; display: flex; gap: 10px; align-items: baseline; }
+.event-box summary::-webkit-details-marker { display: none; }
+.event-box summary::before { content: '▸'; color: var(--muted); }
+.event-box[open] summary::before { content: '▾'; }
+.event-box summary span { color: var(--muted); font-weight: 400; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; padding: 0 16px 16px; }
+.event-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.event-form label.wide { grid-column: 1 / -1; }
+.event-form input, .event-form textarea { font: inherit; font-size: 16px; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 12px; min-height: 44px; }
+.event-form textarea { min-height: 70px; resize: vertical; }
 .report-row { text-align: center; margin-top: 24px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; align-items: center; }
 .footer-note { color: var(--muted); font-size: 13px; text-align: center; margin: 24px 0; }
 </style>
@@ -141,6 +153,17 @@ table.sl tr.rider.dnf td.chk-td, table.sl tr.rider.out td.res { opacity: 1; }
     <p>Tap <b>Import start list</b> and pick one or more UCI start list PDFs from Files.</p>
     <p>Everything is stored on this iPad and works without a connection.</p>
   </div>
+  <details class="event-box" id="eventBox">
+    <summary>Event details <span id="eventSummary"></span></summary>
+    <div class="event-form">
+      <label>Event name<input id="evName" autocomplete="off"></label>
+      <label>Location<input id="evLocation" autocomplete="off" placeholder="e.g. Lake Placid, NY, USA"></label>
+      <label>Dates<input id="evDates" autocomplete="off" placeholder="e.g. 2–4 Oct 2026"></label>
+      <label>Official<input id="evOfficial" autocomplete="off" placeholder="Your name"></label>
+      <label>Role<input id="evRole" autocomplete="off" placeholder="e.g. Bike check commissaire"></label>
+      <label class="wide">Notes<textarea id="evNotes" placeholder="Anything to include on the report"></textarea></label>
+    </div>
+  </details>
   <div id="raceList"></div>
   <div class="report-row"><button id="exportAllBtn" class="btn hidden">Download checks report (all races)</button>
     <button id="driveBtn" class="btn small">Connect Google Drive</button></div>
@@ -709,23 +732,34 @@ async function saveToDrive(csv, name) {
   if (res && res.ok) toast(`Saved to Google Drive > ${res.folder}: ${name}`, null, { label: 'Share too', fn: () => shareFile(csv, name) });
   else toast(`Couldn’t save to Drive (${(res && res.error) || 'error'})`, null, { label: 'Share instead', fn: () => shareFile(csv, name) });
 }
+function fileName(parts) {
+  const clean = parts.filter(Boolean).map(x => String(x).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim());
+  // "Lake Placid 2026 XCO Women Elite - Bike Checks.csv"
+  const last = clean.pop();
+  return (clean.length ? clean.join(' ') + ' - ' + last : last) + '.csv';
+}
 function exportCsv() {
   const r = races[currentId];
-  const name = (raceTitle(r) + ' ' + (r.meta.date || '')).trim().replace(/[^\w-]+/g, '_') + '_bike_checks.csv';
+  const name = fileName([eventLabel(r), raceTitle(r), eventOf(r) ? '' : r.meta.date, 'Bike Checks']);
   const rows = csvRows(r, false);
   if (!rows.length) { toast('No riders checked in this race yet.'); return; }
-  shareCsv([CSV_HEAD.join(',')].concat(rows), name);
+  shareCsv(eventLines([r]).concat([CSV_HEAD.join(',')], rows), name);
 }
 // One report covering every imported race, in schedule order.
 function exportAllCsv() {
   const list = Object.values(races).sort((a, b) => sortKey(a) < sortKey(b) ? -1 : 1);
   if (!list.length) return;
   const head = ['Date', 'Race', 'Race Start'].concat(CSV_HEAD).join(',');
-  const lines = [head];
+  const lines = eventLines(list).concat([head]);
+  const top = lines.length;
   list.forEach(r => lines.push(...csvRows(r, true)));
-  if (lines.length === 1) { toast('No riders checked yet.'); return; }
+  if (lines.length === top) { toast('No riders checked yet.'); return; }
+  // Named after the event when every race is from the same one, e.g. "Lake Placid 2026 - Bike Checks.csv".
+  const events = [...new Set(list.map(eventLabel))];
   const d = new Date(), pad = n => String(n).padStart(2, '0');
-  shareCsv(lines, `Bike_checks_report_${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.csv`);
+  shareCsv(lines, events.length === 1 && events[0]
+    ? fileName([events[0], 'Bike Checks'])
+    : fileName(['Bike Checks', `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`]));
 }
 
 /* ---------- Live results (ChronoRace) ---------- */
@@ -752,6 +786,62 @@ function crGet(path) {
 }
 function ymd(d) { return d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0'); }
 
+// "UCI MOUNTAIN BIKE WORLD SERIES - XCC #9 - XCO #9 - DHI #9 - Lake Placid, October 2-4, USA" -> "Lake Placid"
+function eventNameFrom(display) {
+  const last = String(display || '').split(' - ').pop().split(',')[0].trim();
+  return last || null;
+}
+// The start list PDFs only show the event name in a picture, so it comes from the timing feed.
+// Fetched in the background so it's already saved when a report is downloaded (even offline).
+async function fillEventName(r) {
+  if (!r || (r.live && r.live.eventName) || navigator.onLine === false) return;
+  try {
+    if (!r.live) r.live = await findLiveRace(r);
+    else {
+      const cms = await crGet('uci/dh/cms/' + r.live.event);
+      if (cms) r.live.eventName = eventNameFrom(cms.DisplayName);
+    }
+    if (r.live && r.live.eventName) { saveRaces(); renderEventSummary(); }
+  } catch (e) {}
+}
+function fillEventNames() { Object.values(races).forEach(fillEventName); }
+// Event details typed in on the home screen. They go at the top of each report, and the event name
+// typed here is used in file names ahead of the one from the timing feed.
+const EVENT_KEY = 'bikecheck.event.v1';
+const EVENT_FIELDS = [['name', 'evName', 'Event'], ['location', 'evLocation', 'Location'], ['dates', 'evDates', 'Dates'],
+  ['official', 'evOfficial', 'Official'], ['role', 'evRole', 'Role'], ['notes', 'evNotes', 'Notes']];
+function eventDetails() { try { return JSON.parse(localStorage.getItem(EVENT_KEY)) || {}; } catch (e) { return {}; } }
+function saveEventDetails() {
+  const d = {};
+  for (const [k, id] of EVENT_FIELDS) { const v = $('#' + id).value.trim(); if (v) d[k] = v; }
+  try { localStorage.setItem(EVENT_KEY, JSON.stringify(d)); } catch (e) {}
+  renderEventSummary();
+}
+function feedEventName() { const r = Object.values(races).find(x => x.live && x.live.eventName); return r ? r.live.eventName : ''; }
+function renderEventBox() {
+  const d = eventDetails();
+  for (const [k, id] of EVENT_FIELDS) $('#' + id).value = d[k] || '';
+  renderEventSummary();
+}
+function renderEventSummary() {
+  const d = eventDetails(), feed = feedEventName();
+  $('#evName').placeholder = feed ? feed + ' (from live timing)' : 'e.g. Lake Placid World Cup';
+  $('#eventSummary').textContent = [d.name || feed, d.dates, d.official].filter(Boolean).join(' · ') || 'Tap to add';
+}
+// Lines that head a report: "Event,Lake Placid" and so on, then a blank line before the table.
+function eventLines(list) {
+  const d = { ...eventDetails() };
+  if (!d.name) d.name = [...new Set(list.map(eventOf).filter(Boolean))].join(' / ');
+  const out = EVENT_FIELDS.filter(([k]) => d[k]).map(([k, , label]) => [label, d[k]].map(csvQuote).join(','));
+  return out.length ? out.concat(['']) : [];
+}
+// "Lake Placid 2026", without doubling a year that's already in a typed-in name.
+function eventLabel(r) { const n = eventOf(r), y = yearOf(r); return n && y && !n.includes(y) ? n + ' ' + y : n; }
+function eventOf(r) { return eventDetails().name || (r.live && r.live.eventName) || ''; }
+function yearOf(r) {
+  const m = (r.live && r.live.event || '').match(/^(\d{4})/) || (r.meta.date || '').match(/(\d{4})$/);
+  return m ? m[1] : '';
+}
 async function findLiveRace(r) {
   const disc = /SHORT TRACK/i.test(r.meta.discipline || '') ? 'XCC' : /DOWNHILL/i.test(r.meta.discipline || '') ? null : 'XCO';
   const st = startDate(r);
@@ -771,7 +861,7 @@ async function findLiveRace(r) {
       if (n.Route) { try { key = JSON.parse(n.Route).Params.key; } catch (e) {} }
       (n.Childs || []).forEach(walk);
     })(cat);
-    if (key) return { event, key };
+    if (key) return { event, key, eventName: eventNameFrom(cms.DisplayName) };
   }
   return null;
 }
@@ -917,6 +1007,7 @@ $('#fileInput').onchange = async e => {
       msgs.push(`${f.name}: ${err.message}`);
     }
   }
+  fillEventNames();
   if (files.length === 1 && lastId) openRace(lastId); else renderHome();
   toast(msgs.join(' · '));
 };
@@ -951,6 +1042,8 @@ $('#moreBtn').onclick = () => $('#moreTools').classList.toggle('hidden');
 $('#exportBtn').onclick = exportCsv;
 $('#exportAllBtn').onclick = exportAllCsv;
 $('#driveBtn').onclick = setupDrive;
+EVENT_FIELDS.forEach(([, id]) => { $('#' + id).oninput = saveEventDetails; });
+renderEventBox();
 renderDriveBtn();
 $('#resetBtn').onclick = () => {
   if (!confirm('Clear every check, DNS and DNF mark for this race?')) return;
@@ -971,7 +1064,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 17;
+const APP_VERSION = 19;
 $('#appVersion').textContent = `Bike Check version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
@@ -1009,7 +1102,8 @@ function autoOpenTick() {
   const id = currentRaceId();
   if (!id || id === currentId || autoOpened.has(id)) return;
   // Don't switch under the user's finger or mid-search.
-  if (Date.now() - lastInteraction < 30000 || document.activeElement === $('#search')) return;
+  if (Date.now() - lastInteraction < 30000 || document.activeElement === $('#search') ||
+      document.activeElement.closest && document.activeElement.closest('#eventBox')) return;
   const prev = currentId;
   openRace(id);
   const r = races[id];
@@ -1018,6 +1112,8 @@ function autoOpenTick() {
 }
 setInterval(autoOpenTick, 15000);
 
+fillEventNames();
+window.addEventListener('online', fillEventNames);
 const startId = currentRaceId();
 if (startId) openRace(startId); else renderHome();
 </script>
