@@ -645,7 +645,8 @@ const CSV_HEAD = ['Start', 'Outfit', 'Nr', 'Name', 'Team', 'UCI ID', 'NAT', 'YOB
 function csvQuote(v) { v = String(v ?? ''); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
 function csvRows(r, withRace) {
   const at = v => v ? new Date(v).toLocaleString() : '';
-  return r.riders.map(x => {
+  // The report lists only riders whose bike was checked.
+  return r.riders.filter(x => checkOf(r, x.bib)).map(x => {
     const st = statusOf(r, x.bib), k = checkOf(r, x.bib);
     const row = [
       x.start, x.outfit, x.bib, x.name, x.team, x.uciId, x.nat, x.yob, x.wcs, x.uci,
@@ -711,7 +712,9 @@ async function saveToDrive(csv, name) {
 function exportCsv() {
   const r = races[currentId];
   const name = (raceTitle(r) + ' ' + (r.meta.date || '')).trim().replace(/[^\w-]+/g, '_') + '_bike_checks.csv';
-  shareCsv([CSV_HEAD.join(',')].concat(csvRows(r, false)), name);
+  const rows = csvRows(r, false);
+  if (!rows.length) { toast('No riders checked in this race yet.'); return; }
+  shareCsv([CSV_HEAD.join(',')].concat(rows), name);
 }
 // One report covering every imported race, in schedule order.
 function exportAllCsv() {
@@ -720,6 +723,7 @@ function exportAllCsv() {
   const head = ['Date', 'Race', 'Race Start'].concat(CSV_HEAD).join(',');
   const lines = [head];
   list.forEach(r => lines.push(...csvRows(r, true)));
+  if (lines.length === 1) { toast('No riders checked yet.'); return; }
   const d = new Date(), pad = n => String(n).padStart(2, '0');
   shareCsv(lines, `Bike_checks_report_${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.csv`);
 }
@@ -967,7 +971,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 16;
+const APP_VERSION = 17;
 $('#appVersion').textContent = `Bike Check version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
