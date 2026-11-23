@@ -121,7 +121,7 @@ table.sl tr.rider.dnf td.chk-td, table.sl tr.rider.out td.res { opacity: 1; }
   background: #16181d; color: #fff; padding: 12px 16px; border-radius: 12px; display: flex; gap: 14px; align-items: center;
   box-shadow: 0 6px 24px rgba(0,0,0,.25); z-index: 50; max-width: calc(100% - 32px); }
 .toast button { background: none; border: 0; color: #93b4ff; font-weight: 700; cursor: pointer; padding: 4px; }
-.report-row { text-align: center; margin-top: 24px; }
+.report-row { text-align: center; margin-top: 24px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; align-items: center; }
 .footer-note { color: var(--muted); font-size: 13px; text-align: center; margin: 24px 0; }
 </style>
 </head>
@@ -142,7 +142,8 @@ table.sl tr.rider.dnf td.chk-td, table.sl tr.rider.out td.res { opacity: 1; }
     <p>Everything is stored on this iPad and works without a connection.</p>
   </div>
   <div id="raceList"></div>
-  <div class="report-row"><button id="exportAllBtn" class="btn hidden">Download checks report (all races)</button></div>
+  <div class="report-row"><button id="exportAllBtn" class="btn hidden">Download checks report (all races)</button>
+    <button id="driveBtn" class="btn small">Connect Google Drive</button></div>
   <p class="footer-note" id="appVersion"></p>
 </main>
 
@@ -656,7 +657,12 @@ function csvRows(r, withRace) {
   });
 }
 function shareCsv(lines, name) {
-  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+  const csv = lines.join('\n');
+  if (driveLink()) return saveToDrive(csv, name);
+  shareFile(csv, name);
+}
+function shareFile(csv, name) {
+  const blob = new Blob([csv], { type: 'text/csv' });
   const file = new File([blob], name, { type: 'text/csv' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     navigator.share({ files: [file], title: name }).catch(() => {});
@@ -665,6 +671,42 @@ function shareCsv(lines, name) {
     a.href = URL.createObjectURL(blob); a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
+}
+
+/* ---------- Google Drive (via the Apps Script in drive/SaveToDrive.gs) ---------- */
+// The link holds a private key, so it lives only on this iPad, never in the code.
+const DRIVE_KEY = 'bikecheck.drive.v1';
+function driveLink() { try { return localStorage.getItem(DRIVE_KEY) || ''; } catch (e) { return ''; } }
+function renderDriveBtn() {
+  $('#driveBtn').textContent = driveLink() ? 'Google Drive: on' : 'Connect Google Drive';
+}
+function setupDrive() {
+  const cur = driveLink();
+  const v = prompt(cur
+    ? 'Reports are saved to Google Drive > Bike Checks.\n\nPaste a new link to change it, or clear the box to stop saving to Drive.'
+    : 'Paste the link from the Bike Check Drive script (it starts with https://script.google.com/).', cur);
+  if (v === null) return;
+  const link = v.trim();
+  if (link && !/^https:\/\/script\.google\.com\/.+\/exec\?key=\w+$/.test(link)) {
+    toast('That doesn’t look like the script link. Nothing changed.'); return;
+  }
+  try { link ? localStorage.setItem(DRIVE_KEY, link) : localStorage.removeItem(DRIVE_KEY); } catch (e) {}
+  renderDriveBtn();
+  toast(link ? 'Reports will save to Google Drive > Bike Checks' : 'Google Drive turned off. Reports open the share sheet.');
+}
+async function saveToDrive(csv, name) {
+  toast('Saving to Google Drive…');
+  let res = null;
+  try {
+    const r = await fetch(driveLink(), {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ name, csv }),
+    });
+    res = await r.json();
+  } catch (e) { res = { ok: false, error: navigator.onLine ? 'no answer from Drive' : 'offline' }; }
+  // Sharing needs a fresh tap after waiting on the network, so offer it as a button.
+  if (res && res.ok) toast(`Saved to Google Drive > ${res.folder}: ${name}`, null, { label: 'Share too', fn: () => shareFile(csv, name) });
+  else toast(`Couldn’t save to Drive (${(res && res.error) || 'error'})`, null, { label: 'Share instead', fn: () => shareFile(csv, name) });
 }
 function exportCsv() {
   const r = races[currentId];
@@ -904,6 +946,8 @@ $('#filterSeg').onclick = e => {
 $('#moreBtn').onclick = () => $('#moreTools').classList.toggle('hidden');
 $('#exportBtn').onclick = exportCsv;
 $('#exportAllBtn').onclick = exportAllCsv;
+$('#driveBtn').onclick = setupDrive;
+renderDriveBtn();
 $('#resetBtn').onclick = () => {
   if (!confirm('Clear every check, DNS and DNF mark for this race?')) return;
   Object.assign(races[currentId], { pre: {}, post: {}, dns: {}, dnf: {} }); saveRaces(); renderRace();
@@ -923,7 +967,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 15;
+const APP_VERSION = 16;
 $('#appVersion').textContent = `Bike Check version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
