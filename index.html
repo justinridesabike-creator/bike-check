@@ -121,6 +121,7 @@ table.sl tr.rider.dnf td.chk-td, table.sl tr.rider.out td.res { opacity: 1; }
   background: #16181d; color: #fff; padding: 12px 16px; border-radius: 12px; display: flex; gap: 14px; align-items: center;
   box-shadow: 0 6px 24px rgba(0,0,0,.25); z-index: 50; max-width: calc(100% - 32px); }
 .toast button { background: none; border: 0; color: #93b4ff; font-weight: 700; cursor: pointer; padding: 4px; }
+.report-row { text-align: center; margin-top: 24px; }
 .footer-note { color: var(--muted); font-size: 13px; text-align: center; margin: 24px 0; }
 </style>
 </head>
@@ -141,6 +142,7 @@ table.sl tr.rider.dnf td.chk-td, table.sl tr.rider.out td.res { opacity: 1; }
     <p>Everything is stored on this iPad and works without a connection.</p>
   </div>
   <div id="raceList"></div>
+  <div class="report-row"><button id="exportAllBtn" class="btn hidden">Download checks report (all races)</button></div>
   <p class="footer-note" id="appVersion"></p>
 </main>
 
@@ -168,7 +170,7 @@ table.sl tr.rider.dnf td.chk-td, table.sl tr.rider.out td.res { opacity: 1; }
       <button id="moreBtn" class="btn small">More…</button>
     </div>
     <div id="moreTools" class="tools hidden">
-      <button id="exportBtn" class="btn small">Export CSV</button>
+      <button id="exportBtn" class="btn small">Download checks report</button>
       <button id="resetBtn" class="btn small danger">Clear all checks, DNS &amp; DNF</button>
       <button id="deleteBtn" class="btn small danger">Remove this race</button>
     </div>
@@ -466,6 +468,7 @@ function renderHome() {
   $('#raceView').classList.add('hidden');
   const list = Object.values(races).sort((a, b) => sortKey(a) < sortKey(b) ? -1 : 1);
   $('#emptyState').classList.toggle('hidden', list.length > 0);
+  $('#exportAllBtn').classList.toggle('hidden', list.length === 0);
   const card = r => {
     const c = counts(r), complete = c.done === c.total, split = splitText(c);
     return `<div class="race-card ${complete ? 'complete' : ''}" data-id="${esc(r.id)}">
@@ -636,22 +639,24 @@ function setPhase(phase) {
   renderRace();
 }
 
-function exportCsv() {
-  const r = races[currentId];
-  const head = ['Start', 'Outfit', 'Nr', 'Name', 'Team', 'UCI ID', 'NAT', 'YOB', 'WCS', 'UCI',
-    'Status', 'Checked', 'Checked At', 'Result'];
-  const q = v => /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+const CSV_HEAD = ['Start', 'Outfit', 'Nr', 'Name', 'Team', 'UCI ID', 'NAT', 'YOB', 'WCS', 'UCI',
+  'Status', 'Checked', 'Checked At', 'Result'];
+function csvQuote(v) { v = String(v ?? ''); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+function csvRows(r, withRace) {
   const at = v => v ? new Date(v).toLocaleString() : '';
-  const lines = [head.join(',')].concat(r.riders.map(x => {
+  return r.riders.map(x => {
     const st = statusOf(r, x.bib), k = checkOf(r, x.bib);
-    return [
+    const row = [
       x.start, x.outfit, x.bib, x.name, x.team, x.uciId, x.nat, x.yob, x.wcs, x.uci,
       st ? STATUS[st] : k ? 'Checked' : 'Not checked', k ? PHASES[k.phase] : '', k ? at(k.at) : '',
       resultLabel(r.results && r.results.byBib[x.bib]),
-    ].map(v => q(String(v ?? ''))).join(',');
-  }));
+    ];
+    if (withRace) row.unshift(r.meta.date || '', raceTitle(r), r.meta.startTime || '');
+    return row.map(csvQuote).join(',');
+  });
+}
+function shareCsv(lines, name) {
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
-  const name = (raceTitle(r) + ' ' + (r.meta.date || '')).trim().replace(/[^\w-]+/g, '_') + '_bike_checks.csv';
   const file = new File([blob], name, { type: 'text/csv' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     navigator.share({ files: [file], title: name }).catch(() => {});
@@ -660,6 +665,21 @@ function exportCsv() {
     a.href = URL.createObjectURL(blob); a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
+}
+function exportCsv() {
+  const r = races[currentId];
+  const name = (raceTitle(r) + ' ' + (r.meta.date || '')).trim().replace(/[^\w-]+/g, '_') + '_bike_checks.csv';
+  shareCsv([CSV_HEAD.join(',')].concat(csvRows(r, false)), name);
+}
+// One report covering every imported race, in schedule order.
+function exportAllCsv() {
+  const list = Object.values(races).sort((a, b) => sortKey(a) < sortKey(b) ? -1 : 1);
+  if (!list.length) return;
+  const head = ['Date', 'Race', 'Race Start'].concat(CSV_HEAD).join(',');
+  const lines = [head];
+  list.forEach(r => lines.push(...csvRows(r, true)));
+  const d = new Date(), pad = n => String(n).padStart(2, '0');
+  shareCsv(lines, `Bike_checks_report_${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.csv`);
 }
 
 /* ---------- Live results (ChronoRace) ---------- */
@@ -883,6 +903,7 @@ $('#filterSeg').onclick = e => {
 };
 $('#moreBtn').onclick = () => $('#moreTools').classList.toggle('hidden');
 $('#exportBtn').onclick = exportCsv;
+$('#exportAllBtn').onclick = exportAllCsv;
 $('#resetBtn').onclick = () => {
   if (!confirm('Clear every check, DNS and DNF mark for this race?')) return;
   Object.assign(races[currentId], { pre: {}, post: {}, dns: {}, dnf: {} }); saveRaces(); renderRace();
@@ -902,7 +923,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 14;
+const APP_VERSION = 15;
 $('#appVersion').textContent = `Bike Check version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
