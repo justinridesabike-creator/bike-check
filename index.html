@@ -663,8 +663,8 @@ function setPhase(phase) {
   renderRace();
 }
 
-const CSV_HEAD = ['Start', 'Outfit', 'Nr', 'Name', 'Team', 'UCI ID', 'NAT', 'YOB', 'WCS', 'UCI',
-  'Status', 'Checked', 'Checked At', 'Result'];
+// Check columns come first (after the race in the all-races report), then the rider.
+const CSV_HEAD = ['Checked', 'Checked At', 'Status', 'Start', 'Outfit', 'Nr', 'Name', 'Team', 'UCI ID', 'NAT', 'YOB', 'WCS', 'UCI', 'Result'];
 function csvQuote(v) { v = String(v ?? ''); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
 function csvRows(r, withRace) {
   const at = v => v ? new Date(v).toLocaleString() : '';
@@ -672,8 +672,8 @@ function csvRows(r, withRace) {
   return r.riders.filter(x => checkOf(r, x.bib)).map(x => {
     const st = statusOf(r, x.bib), k = checkOf(r, x.bib);
     const row = [
+      k ? PHASES[k.phase] : '', k ? at(k.at) : '', st ? STATUS[st] : k ? 'Checked' : 'Not checked',
       x.start, x.outfit, x.bib, x.name, x.team, x.uciId, x.nat, x.yob, x.wcs, x.uci,
-      st ? STATUS[st] : k ? 'Checked' : 'Not checked', k ? PHASES[k.phase] : '', k ? at(k.at) : '',
       resultLabel(r.results && r.results.byBib[x.bib]),
     ];
     if (withRace) row.unshift(r.meta.date || '', raceTitle(r), r.meta.startTime || '');
@@ -1064,7 +1064,7 @@ $('#toastUndo').onclick = () => {
   if (currentId) renderRace();
 };
 
-const APP_VERSION = 19;
+const APP_VERSION = 20;
 $('#appVersion').textContent = `Bike Check version ${APP_VERSION}`;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // updateViaCache 'none' makes the iPad check for a new sw.js on every launch instead of trusting its HTTP cache.
